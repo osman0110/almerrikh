@@ -1,0 +1,41 @@
+name: smart_sport_scribe_main
+description: NextKick Flutter app.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  google_fonts: ^6.3.2
+  http: ^1.2.2
+  video_player: ^2.9.2
+  camera: ^0.10.5+9
+  google_mlkit_pose_detection: ^0.13.0
+  permission_handler: ^11.3.1
+  firebase_core: ^3.0.0
+  firebase_auth: ^5.0.0
+  cloud_firestore: ^5.0.0
+  cloud_functions: ^5.0.0
+  shared_preferences: ^2.3.0
+  audioplayers: ^6.0.0
+  pdf: ^3.11.0
+
+dev_dependencies:
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "logo.png"
+  adaptive_icon_background: "#050508"
+  adaptive_icon_foreground: "logo.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - logo.png
+    - assets/images/
+    - assets/videos/

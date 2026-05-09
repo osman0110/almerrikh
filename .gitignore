@@ -1,0 +1,21 @@
+# Flutter and Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+build/
+
+# Local/editor files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.log
+*.local
+*.suo
+*.sw?
+
+# Removed React/Vite leftovers, kept ignored in case Windows locks a file.
+node_modules/
+.vite/
