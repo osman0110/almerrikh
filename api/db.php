@@ -52,6 +52,102 @@ function ensureSchema(PDO $pdo): void {
         CONSTRAINT fk_user_profiles_user
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS assessments (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id INT NOT NULL,
+        player_id VARCHAR(255) NOT NULL,
+        player_name VARCHAR(255) DEFAULT '',
+        type VARCHAR(50) NOT NULL,
+        overall_score INT NOT NULL DEFAULT 0,
+        movement_quality_score INT DEFAULT 0,
+        stability_score INT DEFAULT 0,
+        symmetry_score INT DEFAULT 0,
+        control_score INT DEFAULT 0,
+        quality_score INT DEFAULT 0,
+        issues_json TEXT,
+        tips_json TEXT,
+        drills_json TEXT,
+        angle_metrics_json TEXT,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_assessments_user (user_id),
+        INDEX idx_assessments_player (player_id),
+        CONSTRAINT fk_assessments_user
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // ── Player Monitoring Tables ─────────────────────────────────────────────
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS player_body_metrics (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        weight_kg DECIMAL(5,2) NOT NULL,
+        height_cm DECIMAL(5,1) NOT NULL,
+        body_fat_percent DECIMAL(5,2) NOT NULL,
+        bmi DECIMAL(5,2) NULL,
+        measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_body_metrics_user (user_id),
+        CONSTRAINT fk_body_metrics_user
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS player_hooper_index (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        training_session_id VARCHAR(64) NULL,
+        sleep_quality TINYINT NOT NULL DEFAULT 1,
+        fatigue TINYINT NOT NULL DEFAULT 1,
+        stress TINYINT NOT NULL DEFAULT 1,
+        muscle_soreness TINYINT NOT NULL DEFAULT 1,
+        sleep_hours DECIMAL(3,1) NULL,
+        hooper_score TINYINT NOT NULL,
+        notes TEXT NULL,
+        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_hooper_user (user_id),
+        INDEX idx_hooper_submitted (user_id, submitted_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS player_rpe (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        training_session_id VARCHAR(64) NULL,
+        session_type VARCHAR(50) NULL,
+        rpe_score TINYINT NOT NULL DEFAULT 1,
+        duration_minutes SMALLINT NOT NULL DEFAULT 0,
+        training_load SMALLINT NOT NULL DEFAULT 0,
+        notes TEXT NULL,
+        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_rpe_user (user_id),
+        INDEX idx_rpe_submitted (user_id, submitted_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // ── Wearable Device Integration (Future: Catapult, STATSports, Apple Watch, etc.) ─
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS player_wearable_data (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        device_id VARCHAR(100) NOT NULL,
+        device_type VARCHAR(50) NOT NULL,
+        heart_rate INT NULL,
+        distance_m DECIMAL(8,2) NULL,
+        sprint_count INT NULL,
+        top_speed DECIMAL(5,2) NULL,
+        max_acceleration DECIMAL(5,2) NULL,
+        distance_at_high_intensity INT NULL,
+        rpe_device_estimate INT NULL,
+        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_wearable_user (user_id),
+        INDEX idx_wearable_device (device_id),
+        INDEX idx_wearable_recorded (user_id, recorded_at),
+        CONSTRAINT fk_wearable_user
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
 function ensureColumn(PDO $pdo, string $table, string $column, string $definition): void {
