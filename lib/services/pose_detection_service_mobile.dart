@@ -27,10 +27,6 @@ class PoseDetectionService {
       final input = _inputImageFromFrame(frame);
       if (input == null) return null;
       final poses = await _detector.processImage(input);
-      debugPrint('POSES COUNT: ${poses.length}');
-      if (poses.isNotEmpty) {
-        debugPrint('LANDMARKS COUNT (first pose): ${poses.first.landmarks.length}');
-      }
       if (poses.isEmpty) {
         return const PoseSnapshot(
           bodyBox: null,

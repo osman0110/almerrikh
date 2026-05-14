@@ -101,6 +101,9 @@ class _PlayerManagementPageState extends State<PlayerManagementPage> {
                     ),
                     GestureDetector(
                       onTap: () async {
+                        if (_teams.isEmpty && _playersLoading) {
+                          await _loadPlayersAsync();
+                        }
                         await Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) =>
@@ -605,8 +608,6 @@ class _AddEditPlayerPageState extends State<AddEditPlayerPage> {
   }
 
   Future<void> _save() async {
-    debugPrint('[AddPlayer] Save pressed');
-
     if (_name.text.trim().isEmpty) {
       _snack('Player name is required');
       return;
@@ -616,7 +617,6 @@ class _AddEditPlayerPageState extends State<AddEditPlayerPage> {
       return;
     }
 
-    debugPrint('[AddPlayer] Form valid: true, selectedTeamId: $_teamId');
     setState(() => _saving = true);
 
     final teamName = widget.teams
@@ -641,7 +641,6 @@ class _AddEditPlayerPageState extends State<AddEditPlayerPage> {
         p.dateOfBirth = _dob;
         p.teamId = _teamId!;
         p.teamName = teamName;
-        debugPrint('[AddPlayer] Updating player: ${p.fullName}');
         final updated = await ClubService().updatePlayer(p);
         if (!mounted) return;
         if (updated) {
@@ -669,10 +668,7 @@ class _AddEditPlayerPageState extends State<AddEditPlayerPage> {
           status: _status,
           createdAt: DateTime.now(),
         );
-        debugPrint('[AddPlayer] Player payload: ${player.toMap()}');
-        debugPrint('[AddPlayer] addPlayer start');
         final playerId = await ClubService().addPlayer(player);
-        debugPrint('[AddPlayer] addPlayer end, playerId: $playerId');
         if (!mounted) return;
         if (playerId != null) {
           _snack('Player added successfully');

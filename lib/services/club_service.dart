@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/club_models.dart';
@@ -17,6 +18,43 @@ class ClubService {
 
   static const _clubId = 'al_merrikh_sc';
 
+  bool get _enabled => Firebase.apps.isNotEmpty;
+
+  static final List<ClubTeam> _offlineDefaultTeams = [
+    ClubTeam(
+      id: 'first-team',
+      name: 'First Team',
+      category: TeamCategory.firstTeam,
+      coachName: 'Head Coach',
+      physicalCoachName: 'Physical Coach',
+      season: '2024-2025',
+      playerIds: [],
+      createdAt: DateTime.now(),
+    ),
+    ClubTeam(
+      id: 'u20',
+      name: 'U20',
+      category: TeamCategory.u20,
+      coachName: 'Coach',
+      physicalCoachName: 'Physical Coach',
+      season: '2024-2025',
+      playerIds: [],
+      createdAt: DateTime.now(),
+    ),
+    ClubTeam(
+      id: 'u17',
+      name: 'U17',
+      category: TeamCategory.u17,
+      coachName: 'Coach',
+      physicalCoachName: 'Physical Coach',
+      season: '2024-2025',
+      playerIds: [],
+      createdAt: DateTime.now(),
+    ),
+  ];
+
+  static final List<ClubPlayer> _offlinePlayers = [];
+
   FirebaseFirestore get _db => FirebaseFirestore.instance;
 
   CollectionReference<Map<String, dynamic>> get _teams =>
@@ -33,21 +71,25 @@ class ClubService {
 
   // ── Teams ──────────────────────────────────────────────────────────────────
 
-  Stream<List<ClubTeam>> teamsStream() => _teams
-      .orderBy('createdAt', descending: false)
-      .snapshots()
-      .map((s) => s.docs.map((d) => ClubTeam.fromMap(d.id, d.data())).toList());
+  Stream<List<ClubTeam>> teamsStream() {
+    if (!_enabled) return Stream.value(List<ClubTeam>.from(_offlineDefaultTeams));
+    return _teams
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .map((s) => s.docs.map((d) => ClubTeam.fromMap(d.id, d.data())).toList());
+  }
 
   Future<List<ClubTeam>> getTeams() async {
+    if (!_enabled) {
+      return List<ClubTeam>.from(_offlineDefaultTeams);
+    }
     try {
-      final start = DateTime.now();
       final snap = await _teams.orderBy('createdAt').get();
-      final ms = DateTime.now().difference(start).inMilliseconds;
-      debugPrint('[Firestore] getTeams: ${snap.docs.length} teams in ${ms}ms');
-      return snap.docs.map((d) => ClubTeam.fromMap(d.id, d.data())).toList();
+      final teams = snap.docs.map((d) => ClubTeam.fromMap(d.id, d.data())).toList();
+      return teams.isNotEmpty ? teams : List<ClubTeam>.from(_offlineDefaultTeams);
     } catch (e) {
       debugPrint('ClubService.getTeams: $e');
-      return [];
+      return List<ClubTeam>.from(_offlineDefaultTeams);
     }
   }
 
@@ -93,6 +135,7 @@ class ClubService {
   }
 
   Future<void> seedDefaultTeamsIfEmpty() async {
+    if (!_enabled) return;
     try {
       final existing = await _teams.limit(1).get();
       if (existing.docs.isNotEmpty) return;
@@ -139,6 +182,10 @@ class ClubService {
   // ── Players ────────────────────────────────────────────────────────────────
 
   Stream<List<ClubPlayer>> playersStream({String? teamId}) {
+    if (!_enabled) {
+      if (teamId == null) return Stream.value(List<ClubPlayer>.from(_offlinePlayers));
+      return Stream.value(_offlinePlayers.where((p) => p.teamId == teamId).toList());
+    }
     Query<Map<String, dynamic>> q = _players.orderBy('fullName');
     if (teamId != null) q = q.where('teamId', isEqualTo: teamId);
     return q.snapshots()
@@ -146,13 +193,14 @@ class ClubService {
   }
 
   Future<List<ClubPlayer>> getPlayers({String? teamId}) async {
+    if (!_enabled) {
+      if (teamId == null) return List<ClubPlayer>.from(_offlinePlayers);
+      return _offlinePlayers.where((p) => p.teamId == teamId).toList();
+    }
     try {
-      final start = DateTime.now();
       Query<Map<String, dynamic>> q = _players.orderBy('fullName');
       if (teamId != null) q = q.where('teamId', isEqualTo: teamId);
       final snap = await q.get();
-      final ms = DateTime.now().difference(start).inMilliseconds;
-      debugPrint('[Firestore] getPlayers: ${snap.docs.length} players in ${ms}ms');
       return snap.docs.map((d) => ClubPlayer.fromMap(d.id, d.data())).toList();
     } catch (e) {
       debugPrint('ClubService.getPlayers: $e');
@@ -161,6 +209,15 @@ class ClubService {
   }
 
   Future<ClubPlayer?> getPlayer(String id) async {
+    // Check offline players first if ID is offline
+    if (id.startsWith('offline-')) {
+      try {
+        return _offlinePlayers.firstWhere((p) => p.id == id);
+      } catch (e) {
+        return null;
+      }
+    }
+
     try {
       final doc = await _players.doc(id).get();
       if (!doc.exists) return null;
@@ -171,16 +228,43 @@ class ClubService {
   }
 
   Future<String?> addPlayer(ClubPlayer player) async {
+    if (!_enabled) {
+      final offlineId = 'offline-${DateTime.now().millisecondsSinceEpoch}';
+      final offlinePlayer = ClubPlayer(
+        id: offlineId,
+        fullName: player.fullName,
+        number: player.number,
+        position: player.position,
+        dateOfBirth: player.dateOfBirth,
+        height: player.height,
+        weight: player.weight,
+        dominantFoot: player.dominantFoot,
+        teamId: player.teamId,
+        teamName: player.teamName,
+        nationality: player.nationality,
+        profileImageUrl: player.profileImageUrl,
+        faceImageUrls: List<String>.from(player.faceImageUrls),
+        injuryNotes: player.injuryNotes,
+        physicalNotes: player.physicalNotes,
+        medicalNotes: player.medicalNotes,
+        status: player.status,
+        latestScore: player.latestScore,
+        movementScore: player.movementScore,
+        stabilityScore: player.stabilityScore,
+        symmetryScore: player.symmetryScore,
+        controlScore: player.controlScore,
+        createdAt: DateTime.now(),
+      );
+      _offlinePlayers.add(offlinePlayer);
+      return offlineId;
+    }
     try {
-      debugPrint('[ClubService.addPlayer] Starting - name: ${player.fullName}, teamId: ${player.teamId}');
       final ref = await _players.add(player.toMap());
-      debugPrint('[ClubService.addPlayer] Player doc created: ${ref.id}');
 
       // Also add to team's playerIds
       await _teams.doc(player.teamId).update({
         'playerIds': FieldValue.arrayUnion([ref.id]),
       });
-      debugPrint('[ClubService.addPlayer] Team updated with player ID');
       return ref.id;
     } catch (e, st) {
       debugPrint('ClubService.addPlayer ERROR: $e');
@@ -236,10 +320,13 @@ class ClubService {
 
   // ── Sessions ───────────────────────────────────────────────────────────────
 
-  Stream<List<TrainingSession>> sessionsStream() => _sessions
-      .orderBy('date', descending: true)
-      .snapshots()
-      .map((s) => s.docs.map((d) => TrainingSession.fromMap(d.id, d.data())).toList());
+  Stream<List<TrainingSession>> sessionsStream() {
+    if (!_enabled) return Stream.value([]);
+    return _sessions
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map((s) => s.docs.map((d) => TrainingSession.fromMap(d.id, d.data())).toList());
+  }
 
   Future<List<TrainingSession>> getSessions({String? teamId}) async {
     try {
@@ -297,11 +384,14 @@ class ClubService {
 
   // ── Assessments ────────────────────────────────────────────────────────────
 
-  Stream<List<PlayerAssessment>> assessmentsForPlayer(String playerId) => _assessments
-      .where('playerId', isEqualTo: playerId)
-      .orderBy('date', descending: true)
-      .snapshots()
-      .map((s) => s.docs.map((d) => PlayerAssessment.fromMap(d.id, d.data())).toList());
+  Stream<List<PlayerAssessment>> assessmentsForPlayer(String playerId) {
+    if (!_enabled) return Stream.value([]);
+    return _assessments
+        .where('playerId', isEqualTo: playerId)
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map((s) => s.docs.map((d) => PlayerAssessment.fromMap(d.id, d.data())).toList());
+  }
 
   Future<List<PlayerAssessment>> getAssessmentsForPlayer(String playerId) async {
     try {
@@ -318,13 +408,10 @@ class ClubService {
 
   Future<List<PlayerAssessment>> getLatestAssessments({int limit = 5}) async {
     try {
-      final start = DateTime.now();
       final snap = await _assessments
           .orderBy('date', descending: true)
           .limit(limit)
           .get();
-      final ms = DateTime.now().difference(start).inMilliseconds;
-      debugPrint('[Firestore] getLatestAssessments: ${snap.docs.length} assessments in ${ms}ms');
       return snap.docs.map((d) => PlayerAssessment.fromMap(d.id, d.data())).toList();
     } catch (e) {
       debugPrint('ClubService.getLatestAssessments: $e');
@@ -441,42 +528,4 @@ class ClubService {
   }
 
   // ── Performance Benchmark ──────────────────────────────────────────────────
-
-  Future<void> benchmarkFirestore() async {
-    debugPrint('[Benchmark] Starting Firestore benchmark...');
-
-    // Test 1: First Firestore access
-    final first = DateTime.now();
-    try {
-      final snap = await _db.collection('clubs').limit(1).get();
-      final ms = DateTime.now().difference(first).inMilliseconds;
-      debugPrint('[Benchmark] First Firestore access: ${ms}ms (${snap.docs.length} docs)');
-    } catch (e) {
-      final ms = DateTime.now().difference(first).inMilliseconds;
-      debugPrint('[Benchmark] First access error after ${ms}ms: $e');
-    }
-
-    // Test 2: getTeams() direct call
-    final start2 = DateTime.now();
-    final teams = await getTeams();
-    final ms2 = DateTime.now().difference(start2).inMilliseconds;
-    debugPrint('[Benchmark] getTeams(): ${ms2}ms (${teams.length} teams)');
-
-    // Test 3: getPlayers() direct call
-    final start3 = DateTime.now();
-    final players = await getPlayers();
-    final ms3 = DateTime.now().difference(start3).inMilliseconds;
-    debugPrint('[Benchmark] getPlayers(): ${ms3}ms (${players.length} players)');
-
-    // Test 4: Parallel queries
-    final start4 = DateTime.now();
-    await Future.wait([
-      getTeams(),
-      getPlayers(),
-    ]);
-    final ms4 = DateTime.now().difference(start4).inMilliseconds;
-    debugPrint('[Benchmark] Parallel (teams + players): ${ms4}ms');
-
-    debugPrint('[Benchmark] Complete');
-  }
 }

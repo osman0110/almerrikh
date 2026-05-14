@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import '../models/player_profile_model.dart';
 import 'firebase_service.dart';
 
@@ -37,7 +38,10 @@ class PlayerService {
   Future<PlayerProfile> savePlayer(PlayerProfile profile) async {
     final base = _currentUserPath();
     if (base == null) {
-      throw Exception('User not authenticated');
+      debugPrint('Firebase disabled or user not authenticated, saving profile locally');
+      return profile.id.isEmpty
+          ? PlayerProfile.fromMap('offline-${DateTime.now().millisecondsSinceEpoch}', profile.toMap())
+          : profile;
     }
     final ref = _firestore.collection('$base/players').doc(profile.id.isEmpty
         ? null
@@ -58,7 +62,8 @@ class PlayerService {
   Future<void> deletePlayer(String playerId) async {
     final base = _currentUserPath();
     if (base == null) {
-      throw Exception('User not authenticated');
+      debugPrint('Firebase disabled or user not authenticated, delete skipped');
+      return;
     }
     await _firestore.doc('$base/players/$playerId').delete();
   }
@@ -66,7 +71,8 @@ class PlayerService {
   Future<PlayerProfile?> getPlayerById(String playerId) async {
     final base = _currentUserPath();
     if (base == null) {
-      throw Exception('User not authenticated');
+      debugPrint('Firebase disabled or user not authenticated, returning null');
+      return null;
     }
     final snapshot = await _firestore.doc('$base/players/$playerId').get();
     if (!snapshot.exists) return null;

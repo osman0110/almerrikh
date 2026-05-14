@@ -53,14 +53,14 @@ class FirebaseService {
   }
 
   Future<void> signOut() async {
+    if (!isInitialized) return;
     await _auth.signOut();
   }
 
   Future<void> saveProfileAndGeneratePlan(Map<String, dynamic> profileData) async {
-    if (uid == null) throw Exception('User not authenticated');
-    
-    if (!isInitialized) {
-      throw Exception('Firebase is not initialized');
+    if (uid == null || !isInitialized) {
+      debugPrint('Firebase disabled or user not authenticated, skipping profile save');
+      return;
     }
     try {
       // 1. Save profile to Firestore
@@ -83,6 +83,10 @@ class FirebaseService {
   }
 
   Future<void> adjustNextWeekPlan(String previousPlanId) async {
+    if (!isInitialized) {
+      debugPrint('Firebase disabled, skipping adjustNextWeekPlan');
+      return;
+    }
     try {
       final HttpsCallable callable = _functions.httpsCallable('adjustNextWeekPlan');
       await callable.call({'previousPlanId': previousPlanId});
@@ -103,6 +107,14 @@ class FirebaseService {
     required int reps,
     required int durationMinutes,
   }) async {
+    if (!isInitialized) {
+      debugPrint('Firebase disabled, skipping submitSessionResult');
+      return {
+        'success': true,
+        'earnedXp': (accuracy * 2).round(),
+        'leveledUp': false,
+      };
+    }
     try {
       final HttpsCallable callable = _functions.httpsCallable('submitSessionResult');
       final result = await callable.call({
@@ -118,6 +130,10 @@ class FirebaseService {
   }
 
   Stream<Map<String, dynamic>?> streamLatestPlan() async* {
+    if (!isInitialized) {
+      yield null;
+      return;
+    }
     final currentUid = uid;
     if (currentUid == null) {
       yield null;

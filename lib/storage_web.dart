@@ -1,5 +1,6 @@
 import 'dart:html' as html;
 import 'api_service.dart';
+import 'app_state.dart';
 
 class OnboardingStore {
   Future<bool> hasSeenOnboarding() async {
@@ -35,9 +36,19 @@ class OnboardingStore {
     return html.window.localStorage['ssot.userName'];
   }
 
+  Future<UserRole> getUserRole() async {
+    final role = html.window.localStorage['ssot.userRole'] ?? 'club';
+    return UserRole.values.firstWhere((r) => r.name == role, orElse: () => UserRole.club);
+  }
+
+  Future<void> setUserRole(UserRole role) async {
+    html.window.localStorage['ssot.userRole'] = role.name;
+  }
+
   Future<void> clearSignedIn() async {
     html.window.localStorage.remove('ssot.token');
     html.window.localStorage.remove('ssot.userName');
+    html.window.localStorage.remove('ssot.userRole');
     ApiService.setToken(null);
   }
 }

@@ -35,11 +35,13 @@ class CameraService {
     return status.isGranted || status.isLimited;
   }
 
-  Future<void> initialize() async {
+  Future<void> initialize({bool preferFront = false}) async {
     final cameras = await availableCameras();
     if (cameras.isEmpty) return;
+    final direction =
+        preferFront ? CameraLensDirection.front : CameraLensDirection.back;
     final camera = cameras.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.front,
+      (c) => c.lensDirection == direction,
       orElse: () => cameras.first,
     );
     _cameraDescription = camera;

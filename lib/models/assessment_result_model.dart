@@ -44,6 +44,7 @@ class AssessmentResult {
     required this.recommendedDrills,
     required this.createdAt,
     this.coachNotes,
+    this.debugData = const {},
   });
 
   final String id;
@@ -62,6 +63,7 @@ class AssessmentResult {
   final List<String> recommendedDrills;
   final DateTime createdAt;
   final String? coachNotes;
+  final Map<String, double> debugData; // not persisted — for debug panel only
 
   factory AssessmentResult.fromMap(String id, Map<String, dynamic> data) {
     return AssessmentResult(

@@ -27,7 +27,7 @@ class CameraService {
   bool get isDemoMode => true;
 
   Future<bool> requestPermission() async => true;
-  Future<void> initialize() async {}
+  Future<void> initialize({bool preferFront = false}) async {}
   Future<void> startImageStream({bool landscapeLeft = true}) async {}
   Future<void> stopImageStream() async {}
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../api_service.dart';
+import '../app_colors.dart';
 import '../app_constants.dart';
 import '../app_localizations.dart';
 import '../app_state.dart';
@@ -15,8 +16,9 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin {
-  static const bool _offlineAuthEnabled = true;
+  static const bool _offlineAuthEnabled = false;
 
+  UserRole? _selectedRole;
   bool isSignUp = false;
   bool showPassword = false;
   bool busy = false;
@@ -48,6 +50,21 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
     super.dispose();
   }
 
+  String _roleRoute() {
+    switch (_selectedRole ?? UserRole.club) {
+      case UserRole.club:     return '/club';
+      case UserRole.academy:  return '/academy';
+      case UserRole.player:   return '/player';
+      case UserRole.parent:   return '/parent';
+    }
+  }
+
+  Future<void> _saveRole() async {
+    final role = _selectedRole ?? UserRole.club;
+    currentUserRole = role;
+    await OnboardingStore().setUserRole(role);
+  }
+
   Future<void> submit() async {
     final email = emailController.text.trim();
     final phone = phoneController.text.trim();
@@ -64,11 +81,8 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
           ? name
           : email.isNotEmpty
               ? email.split('@').first
-              : 'Player';
-      await _continueOffline(
-        offlineName,
-        destination: isSignUp ? '/profile-onboarding' : '/',
-      );
+              : 'User';
+      await _continueOffline(offlineName);
       return;
     }
 
@@ -106,7 +120,7 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
 
       if (result.containsKey('error')) {
         if (isSignUp) {
-          await _continueOffline(name, destination: '/profile-onboarding');
+          await _continueOffline(name);
         } else {
           _showSnack(result['error'] as String);
           setState(() => busy = false);
@@ -120,14 +134,14 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
 
       currentUserName = userName;
       await OnboardingStore().setSignedIn(token: token, userName: userName);
+      await _saveRole();
 
       if (!mounted) return;
       setState(() => busy = false);
-      final destination = isSignUp ? '/profile-onboarding' : '/';
-      Navigator.of(context).pushNamedAndRemoveUntil(destination, (_) => false);
+      Navigator.of(context).pushNamedAndRemoveUntil(_roleRoute(), (_) => false);
     } catch (e) {
       if (isSignUp) {
-        await _continueOffline(name, destination: '/profile-onboarding');
+        await _continueOffline(name);
       } else {
         _showSnack(AppLocalizations.get('error_connection'));
         setState(() => busy = false);
@@ -135,18 +149,16 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
     }
   }
 
-  Future<void> _continueOffline(
-    String name, {
-    required String destination,
-  }) async {
-    currentUserName = name.isNotEmpty ? name : 'Player';
+  Future<void> _continueOffline(String name) async {
+    currentUserName = name.isNotEmpty ? name : 'User';
     await OnboardingStore().setSignedIn(
       token: 'offline-demo-${DateTime.now().millisecondsSinceEpoch}',
       userName: currentUserName,
     );
+    await _saveRole();
     if (!mounted) return;
     setState(() => busy = false);
-    Navigator.of(context).pushNamedAndRemoveUntil(destination, (_) => false);
+    Navigator.of(context).pushNamedAndRemoveUntil(_roleRoute(), (_) => false);
   }
 
   void _showSnack(String text) {
@@ -179,6 +191,13 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
+    if (_selectedRole == null) {
+      return _RolePickerPage(onSelect: (role) {
+        setState(() => _selectedRole = role);
+        _animController.forward(from: 0);
+      });
+    }
+
     final isAr = getAppLanguage() == 'ar';
     final title = isSignUp
         ? AppLocalizations.get('auth_title_signup')
@@ -600,6 +619,170 @@ class _GoogleGIcon extends StatelessWidget {
           fontWeight: FontWeight.w900,
           fontSize: 12,
           height: 1,
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Role Picker Page
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _RolePickerPage extends StatelessWidget {
+  const _RolePickerPage({required this.onSelect});
+  final ValueChanged<UserRole> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    const bg = Color(0xff08090F);
+    return Scaffold(
+      backgroundColor: bg,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: maxPhoneWidth),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset(
+                    'assets/images/ssot-logo.png',
+                    width: 72,
+                    height: 72,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'من أنت؟',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'اختر نوع حسابك للمتابعة',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.55),
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  _RoleCard(
+                    role: UserRole.club,
+                    icon: Icons.sports_soccer_rounded,
+                    title: 'نادي رياضي',
+                    subtitle: 'مدرب بدني / إدارة النادي',
+                    color: const Color(0xffCC0A00),
+                    onTap: () => onSelect(UserRole.club),
+                  ),
+                  const SizedBox(height: 12),
+                  _RoleCard(
+                    role: UserRole.academy,
+                    icon: Icons.school_rounded,
+                    title: 'أكاديمية',
+                    subtitle: 'مدرب أكاديمية / مسؤول برامج',
+                    color: const Color(0xff1565C0),
+                    onTap: () => onSelect(UserRole.academy),
+                  ),
+                  const SizedBox(height: 12),
+                  _RoleCard(
+                    role: UserRole.player,
+                    icon: Icons.directions_run_rounded,
+                    title: 'لاعب',
+                    subtitle: 'تابع أداءك وتقييماتك',
+                    color: const Color(0xff2E7D32),
+                    onTap: () => onSelect(UserRole.player),
+                  ),
+                  const SizedBox(height: 12),
+                  _RoleCard(
+                    role: UserRole.parent,
+                    icon: Icons.family_restroom_rounded,
+                    title: 'ولي الأمر',
+                    subtitle: 'تابع تقدم نجلك',
+                    color: const Color(0xff6A1B9A),
+                    onTap: () => onSelect(UserRole.parent),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoleCard extends StatelessWidget {
+  const _RoleCard({
+    required this.role,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  final UserRole role;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        decoration: BoxDecoration(
+          color: const Color(0xff100F18),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: color.withOpacity(0.30), width: 1.2),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.52),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded,
+                color: Colors.white.withOpacity(0.35), size: 22),
+          ],
         ),
       ),
     );

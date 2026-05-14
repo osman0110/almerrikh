@@ -1,5 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
+import 'app_state.dart';
 
 class OnboardingStore {
   Future<bool> hasSeenOnboarding() async {
@@ -42,10 +43,22 @@ class OnboardingStore {
     return prefs.getString('ssot.userName');
   }
 
+  Future<UserRole> getUserRole() async {
+    final prefs = await SharedPreferences.getInstance();
+    final role = prefs.getString('ssot.userRole') ?? 'club';
+    return UserRole.values.firstWhere((r) => r.name == role, orElse: () => UserRole.club);
+  }
+
+  Future<void> setUserRole(UserRole role) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ssot.userRole', role.name);
+  }
+
   Future<void> clearSignedIn() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('ssot.token');
     await prefs.remove('ssot.userName');
+    await prefs.remove('ssot.userRole');
     ApiService.setToken(null);
   }
 }

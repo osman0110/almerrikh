@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../app_colors.dart';
 import '../../models/club_models.dart';
+import '../../models/player_profile_model.dart';
+import '../../models/assessment_result_model.dart';
 import '../../services/club_service.dart';
+import '../../screens/physical_assessment/assessment_camera_page.dart';
 import 'club_widgets.dart';
 import 'player_management.dart';
 
@@ -488,92 +491,145 @@ class _ClubPlayerProfilePageState extends State<ClubPlayerProfilePage> {
 
   Widget _buildAssessmentAction() {
     final latest = _history.isNotEmpty ? _history.first : null;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.sports_score_rounded,
-                    color: AppColors.primary, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Latest Assessment',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
-                      ),
-                    ),
-                    Text(
-                      latest != null
-                          ? '${_testLabel(latest.type)}  ·  ${_formatDate(latest.date)}'
-                          : 'No assessments yet',
-                      style: TextStyle(
-                          color: Colors.white.withOpacity(0.45), fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              if (latest != null)
-                _ScoreBadge(score: latest.overallScore),
-            ],
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.border),
           ),
-          if (latest != null && latest.detectedIssues.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Divider(color: AppColors.border, height: 1),
-            const SizedBox(height: 10),
-            ...latest.detectedIssues.take(2).map(
-                  (issue) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.primarySoft,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.sports_score_rounded,
+                        color: AppColors.primary, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          margin: const EdgeInsets.only(top: 5),
-                          width: 5,
-                          height: 5,
-                          decoration: const BoxDecoration(
-                            color: AppColors.warning,
-                            shape: BoxShape.circle,
+                        const Text(
+                          'Latest Assessment',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            issue,
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.70),
-                              fontSize: 12,
-                            ),
-                          ),
+                        Text(
+                          latest != null
+                              ? '${_testLabel(latest.type)}  ·  ${_formatDate(latest.date)}'
+                              : 'No assessments yet',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.45), fontSize: 12),
                         ),
                       ],
                     ),
                   ),
-                ),
-          ],
-        ],
+                  if (latest != null)
+                    _ScoreBadge(score: latest.overallScore),
+                ],
+              ),
+              if (latest != null && latest.detectedIssues.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Divider(color: AppColors.border, height: 1),
+                const SizedBox(height: 10),
+                ...latest.detectedIssues.take(2).map(
+                      (issue) => Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(top: 5),
+                              width: 5,
+                              height: 5,
+                              decoration: const BoxDecoration(
+                                color: AppColors.warning,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                issue,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.70),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: GestureDetector(
+            onTap: () => _startAssessment(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.videocam_rounded, color: Colors.black, size: 18),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Start AI Assessment',
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _startAssessment() async {
+    if (_player == null) return;
+    final result = await Navigator.of(context).pushNamed(
+      '/physical-assessment/camera',
+      arguments: AssessmentCameraArguments(
+        player: PlayerProfile(
+          id: _player!.id,
+          name: _player!.fullName,
+          heightCm: _player!.height?.toInt(),
+          weightKg: _player!.weight?.toInt(),
+          position: _player!.position,
+        ),
+        testType: AssessmentTestType.squat,
       ),
     );
+    if (result != null) {
+      _load();
+    }
   }
 
   // ── Note Input ───────────────────────────────────────────────────────────────

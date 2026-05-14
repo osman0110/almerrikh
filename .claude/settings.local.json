@@ -1,44 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\assets\\\\\\\\images\" -type f)",
-      "Bash(find \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\" -name \"*.log\")",
-      "Bash(wc -l \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\hs_err_pid23224.log\")",
-      "Bash(head -30 \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\hs_err_pid23224.log\")",
-      "Bash(ls -la \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\build\\\\\\\\web\\\\\\\\\")",
-      "Bash(ls -la \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\build\\\\\\\\\")",
-      "Bash(find \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\lib\" -name \"*.dart\")",
-      "Bash(ls -la \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\.github\\\\\\\\\")",
-      "Bash(ls -la \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\.claude\\\\\\\\\")",
-      "Bash(find \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\" -maxdepth 2 -type f \\\\\\( -name \"*.json\" -o -name \"*.yaml\" \\\\\\))",
-      "Bash(grep -n \"class\\\\|function\\\\|const\\\\|interface\" \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\index.ts\")",
-      "Bash(grep -r \"import 'dart:js'\" \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\lib\")",
-      "Bash(find \"e:\\\\\\\\wamp64\\\\\\\\www\\\\\\\\smart-sport-scribe-main\\\\\\\\lib\\\\\\\\models\" -type f)",
+      "Bash(Get-ChildItem -Path \"e:\\\\wamp64\\\\www\\\\merr\\\\lib\\\\services\\\\\" -File | Select-Object Name)",
       "Bash(flutter analyze *)",
-      "Bash(python3 -)",
-      "Bash(dart --version)",
-      "Bash(python -)",
-      "Bash(python fix_arabic.py)",
-      "Bash(python debug_encoding.py)",
-      "Bash(Get-ChildItem -Path \"e:\\\\wamp64\\\\www\\\\merr\" -Recurse -Force)",
-      "Bash(Select-Object -First 100)",
-      "Bash(Format-List FullName)",
-      "Bash(Select-String -Path \"e:\\\\wamp64\\\\www\\\\merr\\\\lib\\\\screens\\\\live_exercise_page.dart\" -Pattern \"0xff39ff14|neonGreen|neon \")",
-      "Bash(Select-Object LineNumber, Line)",
-      "Bash(Format-Table -AutoSize)",
-      "Bash(dir /s /b e:\\\\wamp64\\\\www\\\\merr\\\\lib)",
-      "Bash(powershell -Command \"Get-ChildItem -Recurse 'e:\\\\wamp64\\\\www\\\\merr\\\\lib' | Select-Object FullName\")",
-      "Bash(powershell -Command \"Get-ChildItem 'e:\\\\wamp64\\\\www\\\\merr\\\\assets' -Recurse | Select-Object FullName\")",
-      "Bash(echo \"\" >> \"e:/wamp64/www/merr/lib/main.dart\")",
-      "Bash(grep -v \"^\\\\s*//\")",
-      "Bash(Get-Content C:\\\\Users\\\\PC\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\e--wamp64-www-merr\\\\3d07f7ba-b1e2-4f2a-8458-5a4b77c397e0\\\\tasks\\\\bpwy677ev.output)",
-      "Bash(Select-Object -Last 5)",
-      "Bash(git init *)",
-      "Bash(git add *)",
-      "Bash(git commit -m ' *)"
-    ],
-    "additionalDirectories": [
-      "e:\\wamp64\\www\\merr\\lib"
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }
