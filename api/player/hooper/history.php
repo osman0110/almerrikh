@@ -29,8 +29,8 @@ function getAuthUser(PDO $pdo): array {
     $token = bearerToken();
     if (!$token) jsonOut(['error' => 'Unauthorized'], 401);
     $stmt = $pdo->prepare(
-        'SELECT u.id FROM users u
-         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ?'
+        'SELECT u.id, u.role FROM users u
+         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > NOW())'
     );
     $stmt->execute([$token]);
     $user = $stmt->fetch();
@@ -39,10 +39,12 @@ function getAuthUser(PDO $pdo): array {
 }
 
 $user  = getAuthUser($pdo);
+if ($user['role'] !== 'player') jsonOut(['error' => 'Forbidden — players only'], 403);
 $limit = min(30, max(1, (int)($_GET['limit'] ?? 14)));
 
 $stmt = $pdo->prepare(
-    'SELECT id, sleep_quality, fatigue, stress, muscle_soreness, sleep_hours, hooper_score, notes, submitted_at
+    'SELECT id, sleep_quality, fatigue, stress, muscle_soreness, sleep_hours, mood,
+            pain_today, pain_location, hooper_score, notes, submitted_at
      FROM player_hooper_index
      WHERE user_id = ?
      ORDER BY submitted_at DESC LIMIT ?'

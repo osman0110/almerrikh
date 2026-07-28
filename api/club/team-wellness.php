@@ -1,5 +1,12 @@
 <?php
 require_once dirname(__DIR__) . '/db.php';
+require_once dirname(__DIR__) . '/player/training-load/TrainingLoadCalculator.php';
+require_once dirname(__DIR__) . '/includes/club_auth.php';
+require_once dirname(__DIR__) . '/includes/fitness/EligiblePlayerRepository.php';
+require_once dirname(__DIR__) . '/includes/fitness/FitnessConfig.php';
+require_once dirname(__DIR__) . '/includes/fitness/SchemaInspector.php';
+require_once dirname(__DIR__) . '/includes/fitness/TrainingLoadWindowService.php';
+require_once dirname(__DIR__) . '/includes/fitness/ActiveSeasonResolver.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -29,8 +36,8 @@ function getAuthUser(PDO $pdo): array {
     $token = bearerToken();
     if (!$token) jsonOut(['error' => 'Unauthorized'], 401);
     $stmt = $pdo->prepare(
-        'SELECT u.id FROM users u
-         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ?'
+        'SELECT u.id, u.role FROM users u
+         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > NOW())'
     );
     $stmt->execute([$token]);
     $user = $stmt->fetch();
@@ -40,21 +47,141 @@ function getAuthUser(PDO $pdo): array {
 
 $user = getAuthUser($pdo);
 
-// For MVP, we return team-level stats computed from all player_hooper_index and player_rpe
-// Future: link to a club_id via coaches or teams table
+// Role check: only club/coach/academy may view team wellness
+if (in_array($user['role'], ['player', 'parent'], true)) {
+    jsonOut(['error' => 'Forbidden — coaches only'], 403);
+}
 
-// ─ Team Readiness % (avg readiness across all monitored players) ─────
-// For now, compute avg hooper for users who submitted today
-$stmt = $pdo->prepare(
-    'SELECT AVG(hooper_score) as avg_hooper FROM player_hooper_index
-     WHERE DATE(submitted_at) = DATE(NOW())'
+$ctx = requireClubPermission($pdo, $user, 'fitness.training_load.view');
+
+// Optional custom date range (?from=YYYY-MM-DD&to=YYYY-MM-DD) — every KPI
+// below now shares the SAME window instead of each having its own hardcoded
+// range (today / 3 days / 7 days / all-time), which is why the coach used to
+// see some numbers populated and others empty on the same screen. Defaults
+// to "today" (a single day) when not provided, matching prior behavior.
+$dateRe = '/^\d{4}-\d{2}-\d{2}$/';
+$from = (isset($_GET['from']) && preg_match($dateRe, $_GET['from'])) ? $_GET['from'] : FitnessConfig::today();
+$to   = (isset($_GET['to'])   && preg_match($dateRe, $_GET['to']))   ? $_GET['to']   : FitnessConfig::today();
+if ($from > $to) { [$from, $to] = [$to, $from]; }
+$rangeStart = (new DateTimeImmutable($from . ' 00:00:00', FitnessConfig::timezone()))
+    ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+$rangeEnd = (new DateTimeImmutable($to . ' 23:59:59', FitnessConfig::timezone()))
+    ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+
+// One official population for Hooper, RPE, load and completeness. A player
+// login is optional; linked_player_id is the reporting identity.
+$trainingLoadRoster = EligiblePlayerRepository::activeForScope(
+    $pdo,
+    (int)$ctx['club_id'],
+    $ctx['team_id'] ?? null
 );
-$stmt->execute();
-$result = $stmt->fetch();
-$avgHooper = (float)($result['avg_hooper'] ?? 0);
+$linkedUserIds = array_values(array_filter(array_column($trainingLoadRoster, 'linked_user_id')));
+$linkedPlayerIds = array_values(array_filter(array_column($trainingLoadRoster, 'id')));
 
-$teamReadiness = 100;
-if ($avgHooper > 0) {
+// Training-load table stays week-based (Mon-Sun) — anchored to the end of
+// the chosen range so it shows the week containing it.
+$referenceDate = $to;
+$playersTrainingLoad = [];
+foreach ($trainingLoadRoster as $p) {
+    $r = TrainingLoadCalculator::getPlayerWeeklyReport(
+        $pdo, (int)($p['linked_user_id'] ?? 0), $p['id'], $referenceDate,
+        TrainingLoadCalculator::DEFAULT_TIMEZONE, false
+    );
+    $window = TrainingLoadWindowService::build(
+        $pdo,
+        (int)($p['linked_user_id'] ?? 0),
+        (string)$p['id'],
+        $referenceDate
+    );
+    $last7 = $window['last_7_days'];
+    $last28 = $window['last_28_days'];
+    $acwr = $window['acwr_details'];
+    $playersTrainingLoad[] = [
+        'player_id'           => $p['id'],
+        'player_name'         => $p['name'],
+        'position'            => $p['position'],
+        'team_name'           => $p['team_name'],
+        'player_photo_url'    => $p['photo_url'] ?? null,
+        'weekly_load'         => $r['weekly_load'],
+        'daily_mean'          => $r['daily_mean'],
+        'standard_deviation'  => $r['standard_deviation'],
+        'monotony'            => $r['monotony'],
+        'strain'              => $r['strain'],
+        'monotony_display'    => $r['monotony_display'],
+        'calculation_status'  => $r['calculation_status'],
+        'completeness_status' => $r['completeness_status'],
+        'days'                => $r['days'], // Mon-Sun breakdown for the team training-load table
+        'days_28'             => $window['days'],
+        'sessions_count_7d'   => $last7['sessions_count'],
+        'total_minutes_7d'    => $last7['total_minutes'],
+        'average_rpe_7d'      => $last7['average_rpe'],
+        'load_7d_preliminary' => $last7['preliminary_load'],
+        'load_28d_preliminary'=> $last28['preliminary_load'],
+        'missing_rpe_count'   => $last28['missing_rpe_count'],
+        'missing_duration_count' => $last28['missing_duration_count'],
+        'data_completeness'   => $last28['data_completeness'],
+        'acute_load_7d'       => $acwr['acute_load_7d'],
+        'chronic_load_weekly_average' => $acwr['chronic_weekly_average'],
+        'acwr'                => $acwr['acwr'],
+        'acwr_classification' => $acwr['classification'],
+        'acwr_details'        => $acwr,
+    ];
+}
+
+$activeSeason = ActiveSeasonResolver::resolve(
+    $pdo,
+    (int)$ctx['club_id'],
+    $ctx['team_id'] ?? null
+);
+
+$emptyResponse = [
+    'team_readiness_score'      => null,
+    'team_readiness_preliminary'=> null,
+    'injury_risk_count'         => 0,
+    'average_rpe'               => null,
+    'weekly_load'               => null,
+    'weekly_load_preliminary'   => null,
+    'recovery_score'            => null,
+    'players_needing_attention' => 0,
+    'total_checked_in'          => 0,
+    'highest_fatigue_players'   => [],
+    'players_training_load'     => $playersTrainingLoad,
+    'range'                     => ['from' => $from, 'to' => $to],
+    'population'                => EligiblePlayerRepository::populationSummary($trainingLoadRoster, []),
+    'active_season'             => $activeSeason,
+];
+
+if (empty($linkedPlayerIds)) {
+    jsonOut($emptyResponse);
+}
+
+$playerIn = implode(',', array_fill(0, count($linkedPlayerIds), '?'));
+$userIn = $linkedUserIds ? implode(',', array_fill(0, count($linkedUserIds), '?')) : '';
+$populationScope = "(linked_player_id IN ($playerIn)";
+$populationParams = $linkedPlayerIds;
+if ($linkedUserIds) {
+    $populationScope .= " OR (linked_player_id IS NULL AND user_id IN ($userIn))";
+    $populationParams = [...$populationParams, ...$linkedUserIds];
+}
+$populationScope .= ')';
+$activeRpeFilter = SchemaInspector::hasColumn($pdo, 'player_rpe', 'is_active_record')
+    ? ' AND is_active_record = 1'
+    : '';
+
+// ─ Team Readiness % (avg hooper within range, scoped to team) ───────────────
+$stmt = $pdo->prepare(
+    "SELECT AVG(hooper_score) as avg_hooper
+     FROM player_hooper_index
+     WHERE submitted_at BETWEEN ? AND ?
+       AND $populationScope"
+);
+$stmt->execute([$rangeStart, $rangeEnd, ...$populationParams]);
+$avgHooperRaw = $stmt->fetch()['avg_hooper'] ?? null;
+$avgHooper = $avgHooperRaw !== null ? (float)$avgHooperRaw : null;
+
+$teamReadiness = null;
+if ($avgHooper !== null) {
+    $teamReadiness = 100;
     if ($avgHooper <= 10) {
         // Normal
     } elseif ($avgHooper <= 16) {
@@ -63,78 +190,121 @@ if ($avgHooper > 0) {
         $teamReadiness -= 40;
     }
 }
-$teamReadiness = max(0, min(100, (int)$teamReadiness));
+if ($teamReadiness !== null) $teamReadiness = max(0, min(100, (int)$teamReadiness));
 
-// ─ Injury Risk Count (players with 2+ risk flags in last 3 days) ───
+// ─ Injury Risk Count (within range, scoped to team) ─────────────────────────
 $stmt = $pdo->prepare(
-    'SELECT COUNT(DISTINCT user_id) as count FROM player_hooper_index
-     WHERE hooper_score >= 17 AND submitted_at >= DATE_SUB(NOW(), INTERVAL 3 DAY)'
+    "SELECT COUNT(DISTINCT user_id) as count
+     FROM player_hooper_index
+     WHERE hooper_score >= 17
+       AND submitted_at BETWEEN ? AND ?
+       AND $populationScope"
 );
-$stmt->execute();
+$stmt->execute([$rangeStart, $rangeEnd, ...$populationParams]);
 $injuryRiskCount = (int)($stmt->fetch()['count'] ?? 0);
 
-// ─ Average RPE (last session) ─────────────────────────────────────
-$stmt = $pdo->prepare('SELECT AVG(rpe_score) as avg_rpe FROM player_rpe');
-$stmt->execute();
-$avgRpe = (float)($stmt->fetch()['avg_rpe'] ?? 0);
-
-// ─ Weekly Load (sum of last 7 days across team) ────────────────────
+// ─ Average RPE (within range, scoped to team) ───────────────────────────────
 $stmt = $pdo->prepare(
-    'SELECT SUM(training_load) as total FROM player_rpe WHERE submitted_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)'
+    "SELECT AVG(rpe_score) as avg_rpe FROM player_rpe
+     WHERE submitted_at BETWEEN ? AND ? AND $populationScope$activeRpeFilter"
 );
-$stmt->execute();
-$weeklyLoad = (int)($stmt->fetch()['total'] ?? 0);
+$stmt->execute([$rangeStart, $rangeEnd, ...$populationParams]);
+$avgRpeRaw = $stmt->fetch()['avg_rpe'] ?? null;
+$avgRpe = $avgRpeRaw !== null ? (float)$avgRpeRaw : null;
 
-// ─ Recovery Score (% of players with good hooper today) ────────────
+// ─ Total Load (within range, scoped to team) ────────────────────────────────
+$weeklyLoadPreliminary = array_sum(array_map(
+    fn(array $row) => (float)$row['weekly_load'],
+    $playersTrainingLoad
+));
+$teamLoadApprovable = !empty($playersTrainingLoad)
+    && count(array_filter(
+        $playersTrainingLoad,
+        fn(array $row) => $row['completeness_status'] === 'COMPLETE'
+    )) === count($playersTrainingLoad);
+$weeklyLoad = $teamLoadApprovable ? $weeklyLoadPreliminary : null;
+
+// ─ Recovery Score (% of team with good hooper, within range) ───────────────
 $stmt = $pdo->prepare(
-    'SELECT COUNT(DISTINCT user_id) as total FROM (
-        SELECT DISTINCT user_id FROM player_hooper_index WHERE DATE(submitted_at) = DATE(NOW())
-    ) t'
+    "SELECT COUNT(DISTINCT user_id) as total
+     FROM player_hooper_index
+     WHERE submitted_at BETWEEN ? AND ?
+       AND $populationScope"
 );
-$stmt->execute();
+$stmt->execute([$rangeStart, $rangeEnd, ...$populationParams]);
 $totalCheckedIn = (int)($stmt->fetch()['total'] ?? 0);
 
 $stmt = $pdo->prepare(
-    'SELECT COUNT(DISTINCT user_id) as recovered FROM (
-        SELECT DISTINCT user_id FROM player_hooper_index
-        WHERE DATE(submitted_at) = DATE(NOW()) AND hooper_score <= 10
-    ) t'
+    "SELECT COUNT(DISTINCT user_id) as recovered
+     FROM player_hooper_index
+     WHERE submitted_at BETWEEN ? AND ?
+       AND hooper_score <= 10
+       AND $populationScope"
 );
-$stmt->execute();
+$stmt->execute([$rangeStart, $rangeEnd, ...$populationParams]);
 $recoveredCount = (int)($stmt->fetch()['recovered'] ?? 0);
 
-$recoveryScore = $totalCheckedIn > 0 ? round(($recoveredCount / $totalCheckedIn) * 100) : 0;
+$recoveryScore = $totalCheckedIn > 0 ? round(($recoveredCount / $totalCheckedIn) * 100) : null;
 
-// ─ Players Needing Attention ────────────────────────────────────────
+// ─ Players Needing Attention (within range, scoped to team) ─────────────────
 $stmt = $pdo->prepare(
-    'SELECT DISTINCT h.user_id FROM player_hooper_index h
-     WHERE DATE(h.submitted_at) = DATE(NOW()) AND (
-        h.hooper_score >= 17 OR
-        h.fatigue >= 6 OR
-        h.sleep_quality <= 2
-     )
-     LIMIT 10'
+    "SELECT COUNT(DISTINCT user_id) as cnt
+     FROM player_hooper_index
+     WHERE submitted_at BETWEEN ? AND ?
+       AND (hooper_score >= 17 OR fatigue >= 6 OR sleep_quality <= 2)
+       AND $populationScope"
 );
-$stmt->execute();
-$playersNeedingAttention = count($stmt->fetchAll());
+$stmt->execute([$rangeStart, $rangeEnd, ...$populationParams]);
+$playersNeedingAttention = (int)($stmt->fetch()['cnt'] ?? 0);
 
-// ─ Highest Fatigue Players (today) ──────────────────────────────────
+// ─ Highest Fatigue (within range, scoped to team) ───────────────────────────
 $stmt = $pdo->prepare(
-    'SELECT user_id, fatigue FROM player_hooper_index
-     WHERE DATE(submitted_at) = DATE(NOW())
-     ORDER BY fatigue DESC LIMIT 5'
+    "SELECT user_id, linked_player_id, fatigue
+     FROM player_hooper_index
+     WHERE submitted_at BETWEEN ? AND ?
+       AND $populationScope
+     ORDER BY fatigue DESC LIMIT 5"
 );
-$stmt->execute();
+$stmt->execute([$rangeStart, $rangeEnd, ...$populationParams]);
 $highestFatigue = $stmt->fetchAll();
 
-// ─ Response ───────────────────────────────────────────────────────
+$submittedStmt = $pdo->prepare(
+    "SELECT DISTINCT linked_player_id, user_id
+     FROM player_hooper_index
+     WHERE submitted_at BETWEEN ? AND ? AND $populationScope"
+);
+$submittedStmt->execute([$rangeStart, $rangeEnd, ...$populationParams]);
+$userToPlayer = [];
+foreach ($trainingLoadRoster as $player) {
+    if (!empty($player['linked_user_id'])) $userToPlayer[(int)$player['linked_user_id']] = $player['id'];
+}
+$submittedPlayerIds = [];
+foreach ($submittedStmt->fetchAll() as $submitted) {
+    $submittedPlayerIds[] = $submitted['linked_player_id']
+        ?: ($userToPlayer[(int)$submitted['user_id']] ?? null);
+}
+$population = EligiblePlayerRepository::populationSummary($trainingLoadRoster, $submittedPlayerIds);
+$teamReadinessPreliminary = $teamReadiness;
+if ($population['missing_players'] > 0) {
+    $teamReadiness = null;
+}
+
+// $playersTrainingLoad was already computed above (broader roster, not
+// gated by linked_user_id) — reused here as-is.
+
 jsonOut([
-    'team_readiness_score'       => $teamReadiness,
-    'injury_risk_count'          => $injuryRiskCount,
-    'average_rpe'                => round($avgRpe, 2),
-    'weekly_load'                => $weeklyLoad,
-    'recovery_score'             => (int)$recoveryScore,
-    'players_needing_attention'  => $playersNeedingAttention,
-    'total_checked_in'           => $totalCheckedIn,
-    'highest_fatigue_players'    => $highestFatigue,
+    'team_readiness_score'      => $teamReadiness,
+    'team_readiness_preliminary'=> $teamReadinessPreliminary,
+    'injury_risk_count'         => $injuryRiskCount,
+    'average_rpe'               => $avgRpe !== null ? round($avgRpe, 2) : null,
+    'weekly_load'               => $weeklyLoad,
+    'weekly_load_preliminary'   => $weeklyLoadPreliminary,
+    'recovery_score'            => $recoveryScore !== null ? (int)$recoveryScore : null,
+    'players_needing_attention' => $playersNeedingAttention,
+    'total_checked_in'          => $totalCheckedIn,
+    'highest_fatigue_players'   => $highestFatigue,
+    'players_training_load'     => $playersTrainingLoad,
+    'range'                     => ['from' => $from, 'to' => $to],
+    'population'                => $population,
+    'active_season'             => $activeSeason,
 ]);

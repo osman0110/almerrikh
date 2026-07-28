@@ -1,5 +1,9 @@
 <?php
 require_once dirname(__DIR__, 2) . '/db.php';
+require_once dirname(__DIR__, 2) . '/includes/wellness_baseline.php';
+require_once dirname(__DIR__, 2) . '/includes/fitness/AcwrCalculator.php';
+require_once dirname(__DIR__, 2) . '/includes/fitness/BodyCompositionRepository.php';
+require_once dirname(__DIR__) . '/training-load/TrainingLoadCalculator.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -29,8 +33,8 @@ function getAuthUser(PDO $pdo): array {
     $token = bearerToken();
     if (!$token) jsonOut(['error' => 'Unauthorized'], 401);
     $stmt = $pdo->prepare(
-        'SELECT u.id FROM users u
-         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ?'
+        'SELECT u.id, u.role, u.linked_player_id FROM users u
+         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > NOW())'
     );
     $stmt->execute([$token]);
     $user = $stmt->fetch();
@@ -39,18 +43,35 @@ function getAuthUser(PDO $pdo): array {
 }
 
 $user = getAuthUser($pdo);
+if ($user['role'] !== 'player') jsonOut(['error' => 'Forbidden — players only'], 403);
 $userId = $user['id'];
+$linkedPlayerId = $user['linked_player_id'] ?? null;
+$localToday = FitnessConfig::today();
+$todayStartUtc = (new DateTimeImmutable($localToday . ' 00:00:00', FitnessConfig::timezone()))
+    ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+$todayEndUtc = (new DateTimeImmutable($localToday . ' 23:59:59', FitnessConfig::timezone()))
+    ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
 
-// Latest body metric
-$stmt = $pdo->prepare('SELECT * FROM player_body_metrics WHERE user_id = ? ORDER BY measured_at DESC LIMIT 1');
-$stmt->execute([$userId]);
-$bodyMetric = $stmt->fetch() ?: null;
+// Unified body-composition source. Compatibility aliases keep existing
+// Flutter consumers working while new reports use the canonical field names.
+$bodyMetric = BodyCompositionRepository::latestForPlayer(
+    $pdo,
+    $linkedPlayerId,
+    (int)$userId,
+    true
+);
+if ($bodyMetric) {
+    $bodyMetric['body_fat_percent'] = $bodyMetric['body_fat_percentage'];
+    $bodyMetric['lean_mass_kg'] = $bodyMetric['fat_free_mass_kg'];
+}
 
 // Today's hooper (same calendar day, UTC)
 $stmt = $pdo->prepare(
-    'SELECT * FROM player_hooper_index WHERE user_id = ? AND DATE(submitted_at) = DATE(NOW()) ORDER BY submitted_at DESC LIMIT 1'
+    'SELECT * FROM player_hooper_index
+     WHERE user_id = ? AND submitted_at BETWEEN ? AND ?
+     ORDER BY submitted_at DESC LIMIT 1'
 );
-$stmt->execute([$userId]);
+$stmt->execute([$userId, $todayStartUtc, $todayEndUtc]);
 $todayHooper = $stmt->fetch() ?: null;
 
 // Last 3 days hooper for injury risk detection
@@ -61,41 +82,64 @@ $stmt->execute([$userId]);
 $recent3Hooper = $stmt->fetchAll();
 
 // Last RPE
-$stmt = $pdo->prepare('SELECT * FROM player_rpe WHERE user_id = ? ORDER BY submitted_at DESC LIMIT 1');
-$stmt->execute([$userId]);
+$activeRpeFilter = SchemaInspector::hasColumn($pdo, 'player_rpe', 'is_active_record')
+    ? ' AND is_active_record = 1'
+    : '';
+$stmt = $pdo->prepare(
+    'SELECT * FROM player_rpe
+     WHERE (linked_player_id = ? OR (linked_player_id IS NULL AND user_id = ?))' .
+    $activeRpeFilter .
+    ' ORDER BY submitted_at DESC LIMIT 1'
+);
+$stmt->execute([$linkedPlayerId, $userId]);
 $lastRpe = $stmt->fetch() ?: null;
 
-// Weekly loads (last 7 days)
-$stmt = $pdo->prepare(
-    'SELECT DATE(submitted_at) as date, SUM(training_load) as daily_load FROM player_rpe
-     WHERE user_id = ? AND submitted_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-     GROUP BY DATE(submitted_at) ORDER BY submitted_at ASC'
-);
-$stmt->execute([$userId]);
-$weeklyLoads = [];
-foreach ($stmt->fetchAll() as $row) {
-    $weeklyLoads[] = (int)($row['daily_load'] ?? 0);
+// Personal Hooper baseline (28-day rolling average, excludes today) — null
+// when the player doesn't have enough history yet for a meaningful baseline.
+$hooperBaseline = getHooperBaseline($pdo, $userId, $localToday);
+$elevatedVsBaseline = $todayHooper
+    ? isElevatedVsBaseline((float)$todayHooper['hooper_score'], $hooperBaseline)
+    : false;
+
+// ACWR uses the same deduplicated, quality-aware daily load source as the
+// weekly report. Missing/unknown days make the result INSUFFICIENT_DATA.
+$today = new DateTimeImmutable(FitnessConfig::today(), FitnessConfig::timezone());
+$rollingStart = $today->modify('-27 days');
+$dailyRecords = [];
+$weekCache = [];
+for ($cursor = $rollingStart; $cursor <= $today; $cursor = $cursor->modify('+1 day')) {
+    $date = $cursor->format('Y-m-d');
+    $bounds = TrainingLoadCalculator::weekBounds($date, TrainingLoadCalculator::DEFAULT_TIMEZONE);
+    $weekKey = $bounds['week_start'];
+    if (!isset($weekCache[$weekKey])) {
+        $weekCache[$weekKey] = TrainingLoadCalculator::getPlayerWeeklyReport(
+            $pdo,
+            (int)$userId,
+            $linkedPlayerId,
+            $date,
+            TrainingLoadCalculator::DEFAULT_TIMEZONE,
+            false
+        );
+    }
+    $day = null;
+    foreach ($weekCache[$weekKey]['days'] as $candidate) {
+        if ($candidate['date'] === $date) {
+            $day = $candidate;
+            break;
+        }
+    }
+    $dailyRecords[] = [
+        'date' => $date,
+        'load' => $day !== null ? (float)$day['daily_load'] : null,
+        'complete' => $day !== null && empty($day['data_quality_issues']),
+    ];
 }
-// Pad to 7 days
-while (count($weeklyLoads) < 7) array_unshift($weeklyLoads, 0);
-$weeklyLoads = array_slice($weeklyLoads, -7);
-
-// ACWR: Acute (last 7 days) vs Chronic (last 28 days)
-$stmt = $pdo->prepare(
-    'SELECT SUM(training_load) as total FROM player_rpe WHERE user_id = ? AND submitted_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)'
+$acwrDetails = AcwrCalculator::calculate($dailyRecords);
+$acwr = $acwrDetails['acwr'];
+$weeklyLoads = array_map(
+    fn(array $row) => $row['load'] !== null ? (float)$row['load'] : null,
+    array_slice($dailyRecords, -7)
 );
-$stmt->execute([$userId]);
-$acuteTotal = (int)(($stmt->fetch()['total'] ?? 0));
-$acuteLoad = $acuteTotal > 0 ? $acuteTotal / 7 : 0;
-
-$stmt = $pdo->prepare(
-    'SELECT SUM(training_load) as total FROM player_rpe WHERE user_id = ? AND submitted_at >= DATE_SUB(NOW(), INTERVAL 28 DAY)'
-);
-$stmt->execute([$userId]);
-$chronicTotal = (int)(($stmt->fetch()['total'] ?? 0));
-$chronicLoad = $chronicTotal > 0 ? $chronicTotal / 28 : 0;
-
-$acwr = $chronicLoad > 0 ? round($acuteLoad / $chronicLoad, 2) : 0;
 
 // ─ Readiness Score (0–100) ─────────────────────────────────────────────
 $readiness = 100;
@@ -112,13 +156,18 @@ if ($todayHooper) {
     if ((int)$todayHooper['fatigue'] >= 6) $readiness -= 15;
     if ((int)$todayHooper['sleep_quality'] <= 2) $readiness -= 15;
     if ((float)($todayHooper['sleep_hours'] ?? 0) < 6) $readiness -= 10;
+
+    // Elevated relative to THIS player's own baseline, even if still under
+    // the fixed "moderate/high_risk" absolute cutoffs — catches an early
+    // warning sign for a player whose personal normal runs low.
+    if ($elevatedVsBaseline && $h <= 16) $readiness -= 10;
 }
 
 if ($lastRpe && $lastRpe['training_load'] > 300) {
     $readiness -= 10;
 }
 
-if ($acwr > 1.5) {
+if ($acwr !== null && $acwr > 1.5) {
     $readiness -= 20;
 }
 
@@ -147,7 +196,7 @@ if ($todayHooper && (int)$todayHooper['fatigue'] >= 6 && $lastRpe && $lastRpe['r
 }
 
 // ACWR danger zone
-if ($acwr > 1.5) {
+if ($acwr !== null && $acwr > 1.5) {
     $injuryRiskCount++;
     $alerts[] = 'Acute-to-chronic load ratio exceeds safe threshold';
 }
@@ -156,6 +205,13 @@ if ($acwr > 1.5) {
 if ($todayHooper && (int)$todayHooper['sleep_quality'] <= 2) {
     $injuryRiskCount++;
     $alerts[] = 'Poor sleep quality detected';
+}
+
+// Elevated vs personal baseline (only counted once, and only when the
+// absolute-cutoff alert above didn't already flag today's score)
+if ($elevatedVsBaseline && $todayHooper && (int)$todayHooper['hooper_score'] <= 16) {
+    $injuryRiskCount++;
+    $alerts[] = 'Hooper Index elevated compared to your own recent average';
 }
 
 // ─ AI Insights Feed ────────────────────────────────────────────────────
@@ -173,7 +229,7 @@ if ($todayHooper && (int)$todayHooper['hooper_score'] <= 10) {
     $insights[] = 'Excellent wellness status — ready for intense training';
 }
 
-if ($acwr > 1.3 && $acwr <= 1.5) {
+if ($acwr !== null && $acwr > 1.3 && $acwr <= 1.5) {
     $insights[] = 'Monitor load carefully — approaching caution zone';
 }
 
@@ -215,9 +271,12 @@ jsonOut([
     'weekly_loads'     => $weeklyLoads,
     'readiness_score'  => (int)$readiness,
     'acwr'             => $acwr,
-    'acute_load'       => round($acuteLoad, 2),
-    'chronic_load'     => round($chronicLoad, 2),
+    'acute_load'       => $acwrDetails['acute_load_7d'],
+    'chronic_load'     => $acwrDetails['chronic_weekly_average'],
+    'acwr_details'     => $acwrDetails,
     'wellness_status'  => $wellnessStatus,
+    'hooper_baseline'  => $hooperBaseline, // null until 5+ entries of history exist
+    'elevated_vs_baseline' => $elevatedVsBaseline,
     'injury_risk_count' => $injuryRiskCount,
     'alerts'           => $alerts,
     'insights'         => $insights,

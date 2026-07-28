@@ -1,5 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/db.php';
+require_once dirname(__DIR__, 2) . '/includes/fitness/BodyCompositionRepository.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -29,8 +30,8 @@ function getAuthUser(PDO $pdo): array {
     $token = bearerToken();
     if (!$token) jsonOut(['error' => 'Unauthorized'], 401);
     $stmt = $pdo->prepare(
-        'SELECT u.id FROM users u
-         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ?'
+        'SELECT u.id, u.role, u.linked_player_id FROM users u
+         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > NOW())'
     );
     $stmt->execute([$token]);
     $user = $stmt->fetch();
@@ -39,19 +40,31 @@ function getAuthUser(PDO $pdo): array {
 }
 
 $user = getAuthUser($pdo);
+if ($user['role'] !== 'player') jsonOut(['error' => 'Forbidden — players only'], 403);
 
-$stmt = $pdo->prepare(
-    'SELECT * FROM player_body_metrics WHERE user_id = ? ORDER BY measured_at DESC LIMIT 1'
+$metric = BodyCompositionRepository::latestForPlayer(
+    $pdo,
+    $user['linked_player_id'] ?? null,
+    (int)$user['id'],
+    false
 );
-$stmt->execute([$user['id']]);
-$metric = $stmt->fetch() ?: null;
+$history = BodyCompositionRepository::historyForPlayer(
+    $pdo,
+    $user['linked_player_id'] ?? null,
+    (int)$user['id'],
+    30,
+    false
+);
 
-// History last 30 entries for trend
-$stmt2 = $pdo->prepare(
-    'SELECT id, body_fat_percent, bmi, weight_kg, measured_at
-     FROM player_body_metrics WHERE user_id = ? ORDER BY measured_at DESC LIMIT 30'
-);
-$stmt2->execute([$user['id']]);
-$history = $stmt2->fetchAll();
+$compat = function (?array $row): ?array {
+    if (!$row) return null;
+    return array_merge($row, [
+        'body_fat_percent' => $row['body_fat_percentage'],
+        'lean_mass_kg' => $row['fat_free_mass_kg'],
+        'bmi' => $row['raw']['bmi'] ?? null,
+    ]);
+};
+$metric = $compat($metric);
+$history = array_map($compat, $history);
 
 jsonOut(['metric' => $metric, 'history' => $history]);

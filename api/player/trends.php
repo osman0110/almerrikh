@@ -30,7 +30,7 @@ function getAuthUser(PDO $pdo): array {
     if (!$token) jsonOut(['error' => 'Unauthorized'], 401);
     $stmt = $pdo->prepare(
         'SELECT u.id FROM users u
-         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ?'
+         JOIN user_tokens t ON u.id = t.user_id WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > NOW())'
     );
     $stmt->execute([$token]);
     $user = $stmt->fetch();

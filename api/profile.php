@@ -42,7 +42,7 @@ function getAuthUser(PDO $pdo): array {
     $stmt = $pdo->prepare(
         'SELECT u.id, u.name, u.email, u.phone FROM users u
          JOIN user_tokens t ON u.id = t.user_id
-         WHERE t.token = ?'
+         WHERE t.token = ? AND (t.expires_at IS NULL OR t.expires_at > NOW())'
     );
     $stmt->execute([$token]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
