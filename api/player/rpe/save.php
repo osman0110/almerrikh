@@ -44,70 +44,8 @@ function getAuthUser(PDO $pdo): array {
     return $user;
 }
 
-function resolvePlayerParticipationMinutes(
-    PDO $pdo,
-    string $sessionId,
-    int $userId,
-    ?string $linkedPlayerId
-): ?int {
-    if ($linkedPlayerId && SchemaInspector::hasTable($pdo, 'match_participations')) {
-        $stmt = $pdo->prepare(
-            'SELECT minutes_played FROM match_participations
-             WHERE match_id = ? AND player_id = ? LIMIT 1'
-        );
-        $stmt->execute([$sessionId, $linkedPlayerId]);
-        $minutes = $stmt->fetchColumn();
-        if ($minutes !== false && (int)$minutes >= 0) return (int)$minutes;
-    }
-
-    if ($linkedPlayerId && SchemaInspector::hasTable($pdo, 'matches')) {
-        $stmt = $pdo->prepare('SELECT player_minutes FROM matches WHERE id = ? LIMIT 1');
-        $stmt->execute([$sessionId]);
-        $rawMinutes = $stmt->fetchColumn();
-        if ($rawMinutes !== false && $rawMinutes !== null) {
-            $minutesByPlayer = json_decode((string)$rawMinutes, true);
-            if (is_array($minutesByPlayer) && isset($minutesByPlayer[$linkedPlayerId])) {
-                return max(0, (int)$minutesByPlayer[$linkedPlayerId]);
-            }
-        }
-    }
-
-    if (SchemaInspector::hasTable($pdo, 'session_players')) {
-        $stmt = $pdo->prepare(
-            'SELECT started_at, completed_at FROM session_players
-             WHERE session_id = ? AND player_user_id = ? LIMIT 1'
-        );
-        $stmt->execute([$sessionId, $userId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row && $row['started_at']) {
-            $end = $row['completed_at'] ?: date('Y-m-d H:i:s');
-            $seconds = strtotime($end) - strtotime($row['started_at']);
-            if ($seconds > 0) return min(480, max(1, (int)round($seconds / 60)));
-        }
-    }
-
-    // A full-participation session starts with its planned duration. The coach
-    // can replace it with the player's actual exposure from the load report.
-    if (SchemaInspector::hasTable($pdo, 'club_sessions')) {
-        $stmt = $pdo->prepare('SELECT duration_min FROM club_sessions WHERE id = ? LIMIT 1');
-        $stmt->execute([$sessionId]);
-        $minutes = $stmt->fetchColumn();
-        if ($minutes !== false && (int)$minutes > 0) return (int)$minutes;
-    }
-    if (SchemaInspector::hasTable($pdo, 'training_sessions')) {
-        $stmt = $pdo->prepare('SELECT duration_minutes FROM training_sessions WHERE id = ? LIMIT 1');
-        $stmt->execute([$sessionId]);
-        $minutes = $stmt->fetchColumn();
-        if ($minutes !== false && (int)$minutes > 0) return (int)$minutes;
-    }
-
-    return null;
-}
-
 $user = getAuthUser($pdo);
-$body = $GLOBALS['sessionRpeRequestBody']
-    ?? json_decode(file_get_contents('php://input'), true)
-    ?? [];
+$body = json_decode(file_get_contents('php://input'), true) ?? [];
 
 // A coach (any non-player/parent role) may log RPE on behalf of a roster
 // player — most club players never sign in themselves.
@@ -133,14 +71,17 @@ if ($isCoach) {
     jsonOut(['error' => 'Forbidden'], 403);
 }
 
-if (!isset($body['rpe_score'])) jsonOut(['error' => 'rpe_score is required'], 400);
+if (!isset($body['rpe_score']))       jsonOut(['error' => 'rpe_score is required'], 400);
+if (!isset($body['duration_minutes'])) jsonOut(['error' => 'duration_minutes is required'], 400);
 
-$rpe = (float)$body['rpe_score'];
-if ($rpe < 0 || $rpe > 10 || floor($rpe) !== $rpe) {
-    jsonOut(['error' => 'rpe_score must be an integer from 0 to 10'], 400);
-}
+// RPE accepts decimals (e.g. 5.5) per the RPE APR Rwanda reference sheet.
+$rpe      = (float)$body['rpe_score'];
+$duration = (int)$body['duration_minutes'];
 
-$notes = null;
+if ($rpe < 1 || $rpe > 10)          jsonOut(['error' => 'rpe_score must be 1–10'], 400);
+if ($duration < 1 || $duration > 480) jsonOut(['error' => 'duration_minutes must be 1–480'], 400);
+
+$notes       = isset($body['notes']) ? substr((string)$body['notes'], 0, 500) : null;
 $sessionType = isset($body['session_type']) ? substr((string)$body['session_type'], 0, 50) : null;
 $assessmentId = isset($body['assessment_id']) ? (string)$body['assessment_id'] : null;
 
@@ -149,53 +90,53 @@ $sessionId = null;
 if (!empty($body['session_id']))             $sessionId = (string)$body['session_id'];
 elseif (!empty($body['training_session_id'])) $sessionId = (string)$body['training_session_id'];
 
-// Scoping — never trust client-supplied IDs for the self-report path;
-// for the coach path, the roster ownership check above already verified it.
-$linkedPlayerId = $isCoach ? $coachTargetPlayerId : ($user['linked_player_id'] ?? null);
-$clubId         = $isCoach ? $ctx['club_id']      : ($user['club_user_id']     ?? null);
-
-if (!$isCoach && !$sessionId) {
-    jsonOut(['error' => 'session_id is required for Session RPE'], 400);
-}
-
 $allowedRpeTypes = ['pre', 'post'];
 $rpeType = isset($body['rpe_type']) && in_array($body['rpe_type'], $allowedRpeTypes, true)
     ? $body['rpe_type'] : 'post';
 
-// Hooper/wellness answers are intentionally excluded from Session RPE.
-$painReported = 0;
-$difficulty = null;
+$painReported = isset($body['pain_reported']) ? (int)(bool)$body['pain_reported'] : 0;
+
+$allowedDiff = ['easy', 'good', 'hard', 'too_hard'];
+$difficulty  = isset($body['difficulty']) && in_array($body['difficulty'], $allowedDiff, true)
+    ? $body['difficulty'] : null;
+
 $moodAfter = null;
-$completedFullSession = 1;
-
-$submittedDuration = isset($body['actual_duration_minutes'])
-    ? (int)$body['actual_duration_minutes']
-    : (isset($body['duration_minutes']) ? (int)$body['duration_minutes'] : null);
-if ($submittedDuration !== null && ($submittedDuration < 0 || $submittedDuration > 480)) {
-    jsonOut(['error' => 'actual_duration_minutes must be 0–480'], 400);
+if (isset($body['mood_after'])) {
+    $moodAfter = (int)$body['mood_after'];
+    if ($moodAfter < 1 || $moodAfter > 5) jsonOut(['error' => 'mood_after must be 1–5'], 400);
 }
 
-$actualDuration = $isCoach
-    ? $submittedDuration
-    : resolvePlayerParticipationMinutes(
-        $pdo,
-        (string)$sessionId,
-        (int)$user['id'],
-        $linkedPlayerId ? (string)$linkedPlayerId : null
-    );
-if ($actualDuration === null) {
-    jsonOut([
-        'error' => 'participation_minutes_missing',
-        'message' => 'Actual participation minutes must be recorded by the coach first',
-    ], 409);
+// Partial participation — did the player complete the full planned session?
+$completedFullSession = isset($body['completed_full_session'])
+    ? (int)(bool)$body['completed_full_session'] : 1;
+
+$actualDuration = null;
+if (isset($body['actual_duration_minutes'])) {
+    $actualDuration = (int)$body['actual_duration_minutes'];
+    if ($actualDuration < 0 || $actualDuration > 480)
+        jsonOut(['error' => 'actual_duration_minutes must be 0–480'], 400);
 }
-$duration = $actualDuration;
 
 $incompleteReason = null;
+if (!$completedFullSession) {
+    $incompleteReason = isset($body['incomplete_reason'])
+        ? substr((string)$body['incomplete_reason'], 0, 255) : null;
+    if (!$incompleteReason) jsonOut(['error' => 'incomplete_reason is required when the session was not completed in full'], 400);
+    if ($actualDuration === null) {
+        jsonOut(['error' => 'actual_duration_minutes is required for partial participation'], 400);
+    }
+}
 
-// Session Load always uses the player's actual participation exposure.
-$effectiveDuration = $actualDuration;
+// Session Load uses the player's ACTUAL participation time when the session
+// wasn't completed in full — using the planned/reported duration for a
+// partial session would overstate their training load.
+$effectiveDuration = (!$completedFullSession && $actualDuration !== null) ? $actualDuration : $duration;
 $load = $rpe * $effectiveDuration;
+
+// Scoping — never trust client-supplied IDs for the self-report path;
+// for the coach path, the roster ownership check above already verified it.
+$linkedPlayerId = $isCoach ? $coachTargetPlayerId : ($user['linked_player_id'] ?? null);
+$clubId         = $isCoach ? $ctx['club_id']      : ($user['club_user_id']     ?? null);
 
 $idempotencyKey = trim((string)(
     $_SERVER['HTTP_IDEMPOTENCY_KEY']
@@ -238,11 +179,28 @@ if ($idempotencyKey !== '' && SchemaInspector::hasColumn($pdo, 'player_rpe', 'id
     }
 }
 
+// One-time submission per session: a player's own self-report for a real
+// session locks after the first submission — a coach may still log again to
+// correct a mistake, but the player's own RpeScreen can't be resubmitted.
+if (!$isCoach && $sessionId) {
+    $selfActiveFilter = SchemaInspector::hasColumn($pdo, 'player_rpe', 'is_active_record')
+        ? ' AND is_active_record = 1'
+        : '';
+    $dupStmt = $pdo->prepare(
+        'SELECT id FROM player_rpe
+         WHERE user_id = ? AND session_id = ? AND rpe_type = ?' . $selfActiveFilter . '
+         LIMIT 1'
+    );
+    $dupStmt->execute([$user['id'], $sessionId, $rpeType]);
+    if ($dupStmt->fetchColumn()) {
+        jsonOut(['error' => 'already_submitted', 'message' => 'RPE already submitted for this session'], 409);
+    }
+}
+
 $existingLogical = null;
 if (SchemaInspector::hasColumn($pdo, 'player_rpe', 'logical_key')) {
     $logicalStmt = $pdo->prepare(
-        'SELECT *, TIMESTAMPDIFF(MINUTE, submitted_at, NOW()) AS minutes_since_submission
-         FROM player_rpe
+        'SELECT * FROM player_rpe
          WHERE logical_key = ? AND is_active_record = 1 LIMIT 1'
     );
     $logicalStmt->execute([$logicalKey]);
@@ -250,30 +208,11 @@ if (SchemaInspector::hasColumn($pdo, 'player_rpe', 'logical_key')) {
 }
 
 if ($existingLogical) {
-    if ($isCoach) {
-        requireClubPermission($pdo, $user, 'fitness.rpe.update');
-    }
     if (!$isCoach) {
-        $minutesSinceSubmission = max(0, (int)$existingLogical['minutes_since_submission']);
-        if ($minutesSinceSubmission > FitnessConfig::RPE_PLAYER_EDIT_WINDOW_MINUTES) {
-            jsonOut([
-                'error' => 'edit_window_expired',
-                'message' => 'The 50-minute RPE edit window has expired',
-            ], 409);
-        }
-        // A player's correction changes only the perceived effort. Any
-        // player-specific duration already approved by the coach stays fixed.
-        $actualDuration = $existingLogical['actual_duration_minutes']
-            ?? $existingLogical['duration_minutes'];
-        $duration = (int)$actualDuration;
-        $effectiveDuration = $duration;
-        $load = $rpe * $effectiveDuration;
+        jsonOut(['error' => 'already_submitted', 'message' => 'RPE already submitted for this activity'], 409);
     }
     $reason = trim(substr((string)($body['reason'] ?? ''), 0, 500));
-    if ($isCoach && $reason === '') {
-        jsonOut(['error' => 'reason is required when approving a new RPE'], 400);
-    }
-    if (!$isCoach) $reason = 'Player correction within 50-minute window';
+    if ($reason === '') jsonOut(['error' => 'reason is required when updating RPE'], 400);
 
     $pdo->beginTransaction();
     try {
@@ -293,15 +232,13 @@ if ($existingLogical) {
              rpe_score = ?, duration_minutes = ?, training_load = ?,
              pain_reported = ?, difficulty = ?, mood_after = ?, notes = ?,
              completed_full_session = ?, actual_duration_minutes = ?, incomplete_reason = ?,
-             idempotency_key = ?, revision_number = revision_number + 1,
-             last_edited_at = NOW(), last_edited_by_user_id = ?
+             idempotency_key = ?, revision_number = revision_number + 1
              WHERE id = ?'
         )->execute([
             $rpe, $duration, $load,
             $painReported, $difficulty, $moodAfter, $notes,
             $completedFullSession, $actualDuration, $incompleteReason,
             $idempotencyKey !== '' ? $idempotencyKey : null,
-            (int)$user['id'],
             $existingLogical['id'],
         ]);
         logFitnessAudit(
@@ -322,20 +259,11 @@ if ($existingLogical) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         jsonOut(['error' => 'Unable to update RPE'], 500);
     }
-    if (!$isCoach && $sessionId && SchemaInspector::hasTable($pdo, 'session_players')) {
-        $pdo->prepare(
-            "UPDATE session_players
-             SET status = 'completed', completed_at = COALESCE(completed_at, NOW())
-             WHERE session_id = ? AND player_user_id = ? AND status <> 'missed'"
-        )->execute([$sessionId, $user['id']]);
-    }
     jsonOut([
         'success' => true,
         'id' => (int)$existingLogical['id'],
         'training_load' => $load,
         'updated' => true,
-        'record_status' => 'edited',
-        'edit_window_minutes' => FitnessConfig::RPE_PLAYER_EDIT_WINDOW_MINUTES,
     ]);
 }
 
@@ -373,18 +301,7 @@ logFitnessAudit(
     $idempotencyKey ?: null
 );
 
-if (!$isCoach && $sessionId && SchemaInspector::hasTable($pdo, 'session_players')) {
-    $pdo->prepare(
-        "UPDATE session_players
-         SET status = 'completed', completed_at = COALESCE(completed_at, NOW())
-         WHERE session_id = ? AND player_user_id = ? AND status <> 'missed'"
-    )->execute([$sessionId, $user['id']]);
-}
+// NOTE: session_players completion is handled exclusively by post-feedback.php
+// This endpoint is for standalone RPE logging (monitoring dashboard, ACWR)
 
-jsonOut([
-    'success' => true,
-    'id' => $id,
-    'training_load' => $load,
-    'record_status' => 'original',
-    'edit_window_minutes' => FitnessConfig::RPE_PLAYER_EDIT_WINDOW_MINUTES,
-]);
+jsonOut(['success' => true, 'id' => $id, 'training_load' => $load]);

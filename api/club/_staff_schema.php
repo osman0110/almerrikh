@@ -17,14 +17,12 @@ function ensureClubStaffSchema(PDO $pdo): void {
         id                  INT AUTO_INCREMENT PRIMARY KEY,
         club_id             INT          NOT NULL,
         user_id             INT          NOT NULL,
-        team_id             INT          NULL,
         staff_role          VARCHAR(20)  NOT NULL DEFAULT 'coach', -- owner, admin, coach, doctor, analyst
         status              VARCHAR(20)  NOT NULL DEFAULT 'active', -- active, pending, suspended
         invited_by_user_id  INT          NULL,
         created_at          TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_club_staff (club_id, user_id),
-        INDEX idx_club_staff_user (user_id),
-        INDEX idx_club_staff_team_scope (club_id, team_id, status)
+        INDEX idx_club_staff_user (user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS club_staff_invites (

@@ -7,7 +7,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once 'db.php';
 require_once 'includes/club_auth.php';
-require_once 'includes/audit_log.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -45,40 +44,16 @@ function requireCoachRole(array $user): void {
     }
 }
 
-function sessionTeamScope(PDO $pdo, array $ctx, string $alias = ''): array {
-    if ($ctx['team_id'] === null) return ['', []];
-    $teamStmt = $pdo->prepare(
-        'SELECT name FROM club_teams WHERE id = ? AND club_id = ? AND is_active = 1'
-    );
-    $teamStmt->execute([(int)$ctx['team_id'], (int)$ctx['club_id']]);
-    $teamName = $teamStmt->fetchColumn() ?: '';
-    $prefix = $alias !== '' ? $alias . '.' : '';
-    return [
-        " AND ({$prefix}team_id = ? OR ({$prefix}team_id IS NULL AND {$prefix}team_name = ?))",
-        [(int)$ctx['team_id'], $teamName],
-    ];
-}
-
 $method = $_SERVER['REQUEST_METHOD'];
 $user   = getAuthUser($pdo);
 
 // ── GET: list or single session ───────────────────────────────────────────────
 if ($method === 'GET') {
     $singleId = $_GET['id'] ?? null;
-    $ctx = requireClubPermission($pdo, $user, 'sessions.read');
-    [$teamSql, $teamParams] = sessionTeamScope($pdo, $ctx, 'cs');
 
     if ($singleId) {
-        $stmt = $pdo->prepare(
-            "SELECT cs.*,
-                    (SELECT COUNT(*)
-                     FROM session_attendance sa
-                     WHERE sa.session_id = cs.id
-                       AND sa.status IN ('present', 'late')) AS attendance_present_count
-             FROM club_sessions cs
-             WHERE cs.id = ? AND cs.club_id = ?$teamSql"
-        );
-        $stmt->execute([$singleId, $ctx['club_id'], ...$teamParams]);
+        $stmt = $pdo->prepare('SELECT * FROM club_sessions WHERE id = ? AND user_id = ?');
+        $stmt->execute([$singleId, $user['id']]);
         $row = $stmt->fetch();
         if (!$row) jsonOut(['error' => 'Session not found'], 404);
         normalizeSession($row);
@@ -93,24 +68,15 @@ if ($method === 'GET') {
                 $pStmt = $pdo->prepare(
                     "SELECT id, name, position, number, linked_user_id, status AS player_status
                      FROM club_players
-                     WHERE id IN ($placeholders) AND club_id = ?" .
-                     ($ctx['team_id'] !== null
-                        ? ' AND (team_id = ? OR (team_id IS NULL AND team_name = ?))'
-                        : '') . "
-                     ORDER BY CASE WHEN number IS NULL OR number = 0 THEN 1 ELSE 0 END,
-                              number ASC, name ASC"
+                     WHERE id IN ($placeholders) AND user_id = ?"
                 );
-                $pStmt->execute([
-                    ...$playerIds,
-                    $ctx['club_id'],
-                    ...($ctx['team_id'] !== null ? $teamParams : []),
-                ]);
+                $pStmt->execute([...$playerIds, $user['id']]);
                 $players = $pStmt->fetchAll(PDO::FETCH_ASSOC);
 
                 $aStmt = $pdo->prepare(
-                    'SELECT player_id, status FROM session_attendance WHERE session_id = ?'
+                    'SELECT player_id, status FROM session_attendance WHERE session_id = ? AND user_id = ?'
                 );
-                $aStmt->execute([$singleId]);
+                $aStmt->execute([$singleId, $user['id']]);
                 $attendanceByPlayer = [];
                 foreach ($aStmt->fetchAll(PDO::FETCH_ASSOC) as $a) {
                     $attendanceByPlayer[$a['player_id']] = $a['status'];
@@ -160,23 +126,14 @@ if ($method === 'GET') {
     $status = $_GET['status'] ?? null;
     $limit  = min((int)($_GET['limit'] ?? 50), 200);
 
-    $where = ['cs.club_id = ?'];
-    $params = [$ctx['club_id']];
-    if ($teamSql !== '') {
-        $where[] = substr($teamSql, 5);
-        $params = [...$params, ...$teamParams];
-    }
+    $where = ['user_id = ?'];
+    $params = [$user['id']];
 
-    if ($date)   { $where[] = 'cs.date = ?';   $params[] = $date; }
-    if ($status) { $where[] = 'cs.status = ?'; $params[] = $status; }
+    if ($date)   { $where[] = 'date = ?';   $params[] = $date; }
+    if ($status) { $where[] = 'status = ?'; $params[] = $status; }
 
-    $sql = "SELECT cs.*,
-                   (SELECT COUNT(*)
-                    FROM session_attendance sa
-                    WHERE sa.session_id = cs.id
-                      AND sa.status IN ('present', 'late')) AS attendance_present_count
-            FROM club_sessions cs WHERE " . implode(' AND ', $where)
-         . ' ORDER BY cs.date DESC, cs.start_time ASC LIMIT ' . $limit;
+    $sql = 'SELECT * FROM club_sessions WHERE ' . implode(' AND ', $where)
+         . ' ORDER BY date DESC, start_time ASC LIMIT ' . $limit;
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -192,7 +149,6 @@ function normalizeSession(array &$r): void {
     $r['duration_min']        = (int)$r['duration_min'];
     $r['player_count']        = (int)$r['player_count'];
     $r['assessment_count']    = (int)($r['assessment_count'] ?? 0);
-    $r['attendance_present_count'] = (int)($r['attendance_present_count'] ?? 0);
     $r['ai_enabled']          = (bool)$r['ai_enabled'];
     $r['attendance_required'] = (bool)$r['attendance_required'];
     $r['rpe_required']        = (bool)$r['rpe_required'];
@@ -202,11 +158,6 @@ function normalizeSession(array &$r): void {
         ? json_decode($r['player_ids'], true) ?? [] : [];
     $r['completed_player_ids'] = $r['completed_player_ids'] && $r['completed_player_ids'] !== 'null'
         ? json_decode($r['completed_player_ids'], true) ?? [] : [];
-    $r['player_ids'] = array_values(array_unique(array_map('strval', $r['player_ids'])));
-    $r['completed_player_ids'] = array_values(array_unique(array_map(
-        'strval',
-        $r['completed_player_ids']
-    )));
     $r['assessment_types'] = isset($r['assessment_types']) && $r['assessment_types'] && $r['assessment_types'] !== 'null'
         ? json_decode($r['assessment_types'], true) ?? [] : [];
 }
@@ -224,28 +175,11 @@ if ($method === 'POST') {
 
         if (!$sessionId) jsonOut(['error' => 'session_id required'], 400);
 
-        $ctx = requireClubPermission($pdo, $user, 'sessions.write');
-        [$teamSql, $teamParams] = sessionTeamScope($pdo, $ctx);
-        $ownerStmt = $pdo->prepare(
-            'SELECT id, player_ids, linked_training_session_id
-             FROM club_sessions WHERE id = ? AND club_id = ?' . $teamSql
-        );
-        $ownerStmt->execute([$sessionId, $ctx['club_id'], ...$teamParams]);
+        $ownerStmt = $pdo->prepare('SELECT id, linked_training_session_id FROM club_sessions WHERE id = ? AND user_id = ?');
+        $ownerStmt->execute([$sessionId, $user['id']]);
         $ownerRow = $ownerStmt->fetch(PDO::FETCH_ASSOC);
         if (!$ownerRow) jsonOut(['error' => 'Session not found'], 404);
         $linkedTrainingSessionId = $ownerRow['linked_training_session_id'] ?? null;
-        $rosterIds = json_decode($ownerRow['player_ids'] ?? '[]', true);
-        $rosterIds = is_array($rosterIds)
-            ? array_values(array_unique(array_map('strval', $rosterIds)))
-            : [];
-        $existingAttendanceStmt = $pdo->prepare(
-            'SELECT player_id, status FROM session_attendance WHERE session_id = ?'
-        );
-        $existingAttendanceStmt->execute([$sessionId]);
-        $existingAttendance = [];
-        foreach ($existingAttendanceStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $existingAttendance[(string)$row['player_id']] = (string)$row['status'];
-        }
 
         $validStatuses = ['present', 'absent', 'late'];
         $attStmt = $pdo->prepare(
@@ -268,45 +202,23 @@ if ($method === 'POST') {
         ) : null;
 
         foreach ($attendance as $playerId => $status) {
-            $playerId = (string)$playerId;
-            if (!in_array($playerId, $rosterIds, true)) continue;
             if (!in_array($status, $validStatuses, true)) continue;
             $attStmt->execute([$sessionId, $playerId, $user['id'], $status]);
-            if (($existingAttendance[$playerId] ?? null) !== $status) {
-                logFitnessAudit(
-                    $pdo,
-                    'session_attendance',
-                    $sessionId . ':' . $playerId,
-                    'attendance.update',
-                    (int)$user['id'],
-                    (int)$ctx['club_id'],
-                    $playerId,
-                    ['status' => $existingAttendance[$playerId] ?? null],
-                    ['status' => $status, 'session_id' => $sessionId],
-                    null,
-                    isset($body['operation_id']) ? (string)$body['operation_id'] : null
-                );
-            }
             if ($status === 'absent' && $missedStmt) {
                 $missedStmt->execute([$linkedTrainingSessionId, $playerId]);
             }
         }
 
         $present = array_values(array_filter(
-            $rosterIds,
+            array_keys($attendance),
             fn($pid) => in_array($attendance[$pid] ?? '', ['present', 'late'], true)
         ));
 
-        // Keep only the roster count in sync. completed_player_ids belongs to
-        // physical assessments and must never be overwritten by attendance.
+        // Keep the legacy JSON summary in sync for existing report widgets
         $stmt = $pdo->prepare(
-            'UPDATE club_sessions SET player_count = ? WHERE id = ? AND club_id = ?'
+            'UPDATE club_sessions SET completed_player_ids = ?, player_count = ? WHERE id = ? AND user_id = ?'
         );
-        $stmt->execute([
-            count($rosterIds),
-            $sessionId,
-            $ctx['club_id'],
-        ]);
+        $stmt->execute([json_encode($present), count($present), $sessionId, $user['id']]);
 
         jsonOut(['success' => true, 'present_count' => count($present)]);
     }
@@ -316,12 +228,8 @@ if ($method === 'POST') {
         $sessionId = trim($body['session_id'] ?? '');
         if (!$sessionId) jsonOut(['error' => 'session_id required'], 400);
 
-        $ctx = requireClubPermission($pdo, $user, 'sessions.write');
-        [$teamSql, $teamParams] = sessionTeamScope($pdo, $ctx);
-        $ownerStmt = $pdo->prepare(
-            'SELECT id FROM club_sessions WHERE id = ? AND club_id = ?' . $teamSql
-        );
-        $ownerStmt->execute([$sessionId, $ctx['club_id'], ...$teamParams]);
+        $ownerStmt = $pdo->prepare('SELECT id FROM club_sessions WHERE id = ? AND user_id = ?');
+        $ownerStmt->execute([$sessionId, $user['id']]);
         if (!$ownerStmt->fetch()) jsonOut(['error' => 'Session not found'], 404);
 
         $name = trim($body['exercise_name'] ?? $body['name'] ?? '');
@@ -369,50 +277,31 @@ if ($method === 'POST') {
     // Sessions belong to the whole club (shared across every coach/staff
     // member), not to whichever coach created them — resolve the real club
     // and gate/scope on that instead of a strict creator-id match.
-    $sessionCtx = requireClubPermission($pdo, $user, 'sessions.write');
+    $sessionCtx = resolveClubContext($pdo, $user);
     $sessionClubId = $sessionCtx['club_id'];
-    [, $writeTeamParams] = sessionTeamScope($pdo, $sessionCtx);
-    $sessionTeamId = $sessionCtx['team_id'] !== null
-        ? (int)$sessionCtx['team_id']
-        : (
-            isset($body['team_id']) && $body['team_id'] !== ''
-                ? (int)$body['team_id']
-                : null
-        );
 
     // Ownership check for updates
     if ($id) {
-        $existStmt = $pdo->prepare(
-            'SELECT user_id, club_id, team_id, team_name FROM club_sessions WHERE id = ?'
-        );
+        $existStmt = $pdo->prepare('SELECT user_id, club_id FROM club_sessions WHERE id = ?');
         $existStmt->execute([$id]);
         $existing = $existStmt->fetch();
         if ($existing) {
             $sameClub = $sessionClubId !== null && (int)($existing['club_id'] ?? 0) === (int)$sessionClubId;
             $sameCreator = (int)$existing['user_id'] === (int)$user['id'];
-            $sameTeam = $sessionCtx['team_id'] === null
-                || (int)($existing['team_id'] ?? 0) === (int)$sessionCtx['team_id']
-                || (
-                    $existing['team_id'] === null
-                    && (string)($existing['team_name'] ?? '') === (string)($writeTeamParams[1] ?? '')
-                );
-            if ((!$sameClub && !$sameCreator) || !$sameTeam) {
-                jsonOut(['error' => 'Forbidden'], 403);
-            }
+            if (!$sameClub && !$sameCreator) jsonOut(['error' => 'Forbidden'], 403);
         }
     }
 
     $stmt = $pdo->prepare(
         'INSERT INTO club_sessions
-             (id, user_id, club_id, team_id, title, type, scope, status, date, start_time, end_time,
+             (id, user_id, club_id, title, type, scope, status, date, start_time, end_time,
               duration_min, location, team_name, player_count, intensity, ai_enabled,
               attendance_required, rpe_required, wellness_required, coach_name, notes,
               player_ids, completed_player_ids, assessment_count, assessment_types, position_filter,
               linked_training_session_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
              club_id                = VALUES(club_id),
-             team_id                = VALUES(team_id),
              title                  = VALUES(title),
              type                   = VALUES(type),
              scope                  = VALUES(scope),
@@ -443,45 +332,14 @@ if ($method === 'POST') {
     $playerIds = $body['player_ids'] ?? $body['playerIds'] ?? [];
     $completedIds = $body['completed_player_ids'] ?? $body['completedPlayerIds'] ?? [];
     $assessmentTypes = $body['assessment_types'] ?? $body['assessmentTypes'] ?? [];
-    if (is_string($playerIds)) $playerIds = json_decode($playerIds, true) ?? [];
-    if (is_string($completedIds)) $completedIds = json_decode($completedIds, true) ?? [];
-    $playerIds = is_array($playerIds)
-        ? array_values(array_unique(array_map('strval', $playerIds)))
-        : [];
-    $completedIds = is_array($completedIds)
-        ? array_values(array_unique(array_map('strval', $completedIds)))
-        : [];
-    if ($playerIds) {
-        $placeholders = implode(',', array_fill(0, count($playerIds), '?'));
-        [$playerTeamSql, $playerTeamParams] = sessionTeamScope(
-            $pdo,
-            $sessionCtx,
-            'cp'
-        );
-        $playerCheck = $pdo->prepare(
-            "SELECT cp.id FROM club_players cp
-             WHERE cp.id IN ($placeholders) AND cp.club_id = ?$playerTeamSql"
-        );
-        $playerCheck->execute([
-            ...$playerIds,
-            $sessionClubId,
-            ...$playerTeamParams,
-        ]);
-        $playerIds = array_values(array_unique(array_map(
-            'strval',
-            $playerCheck->fetchAll(PDO::FETCH_COLUMN)
-        )));
-    }
-    $completedIds = array_values(array_intersect($completedIds, $playerIds));
-    $playerIdsJson = json_encode($playerIds);
-    $completedIdsJson = json_encode($completedIds);
+    $playerIdsJson = is_array($playerIds) ? json_encode($playerIds) : $playerIds;
+    $completedIdsJson = is_array($completedIds) ? json_encode($completedIds) : $completedIds;
     $assessmentTypesJson = is_array($assessmentTypes) ? json_encode($assessmentTypes) : $assessmentTypes;
 
     $stmt->execute([
         $id,
         $user['id'],
         $sessionClubId,
-        $sessionTeamId,
         $title,
         $body['type']                ?? 'physicalAssessment',
         $body['scope']               ?? 'team',
@@ -581,15 +439,11 @@ if ($method === 'POST') {
 // ── DELETE: delete session ────────────────────────────────────────────────────
 if ($method === 'DELETE') {
     requireCoachRole($user);
-    $ctx = requireClubPermission($pdo, $user, 'sessions.write');
-    [$teamSql, $teamParams] = sessionTeamScope($pdo, $ctx);
     $id = $_GET['id'] ?? (json_decode(file_get_contents('php://input'), true)['id'] ?? '');
     if (!$id) jsonOut(['error' => 'id is required'], 400);
 
-    $stmt = $pdo->prepare(
-        'DELETE FROM club_sessions WHERE id = ? AND club_id = ?' . $teamSql
-    );
-    $stmt->execute([$id, $ctx['club_id'], ...$teamParams]);
+    $stmt = $pdo->prepare('DELETE FROM club_sessions WHERE id = ? AND user_id = ?');
+    $stmt->execute([$id, $user['id']]);
     jsonOut(['success' => true]);
 }
 

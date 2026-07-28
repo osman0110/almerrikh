@@ -44,36 +44,6 @@ function requireCoachRole(array $user): void {
     }
 }
 
-function scopedTeamPlayerIds(PDO $pdo, array $ctx): array {
-    if ($ctx['team_id'] === null) return [];
-    $teamStmt = $pdo->prepare(
-        'SELECT name FROM club_teams WHERE id = ? AND club_id = ? AND is_active = 1'
-    );
-    $teamStmt->execute([(int)$ctx['team_id'], (int)$ctx['club_id']]);
-    $teamName = $teamStmt->fetchColumn() ?: '';
-    $stmt = $pdo->prepare(
-        'SELECT id FROM club_players
-         WHERE club_id = ? AND is_active = 1
-           AND (team_id = ? OR (team_id IS NULL AND team_name = ?))'
-    );
-    $stmt->execute([
-        (int)$ctx['club_id'],
-        (int)$ctx['team_id'],
-        $teamName,
-    ]);
-    return array_values(array_unique(array_map(
-        'strval',
-        $stmt->fetchAll(PDO::FETCH_COLUMN)
-    )));
-}
-
-function matchInTeamScope(array $match, array $ctx, array $teamPlayerIds): bool {
-    if ($ctx['team_id'] === null) return true;
-    $matchPlayerIds = $match['player_ids'] ?? [];
-    return is_array($matchPlayerIds)
-        && (bool)array_intersect($matchPlayerIds, $teamPlayerIds);
-}
-
 function normalizeMatch(array &$r): void {
     $r['wellness_required'] = (bool)$r['wellness_required'];
     $r['rpe_required']      = (bool)$r['rpe_required'];
@@ -91,7 +61,6 @@ if ($method === 'GET') {
     $singleId = $_GET['id'] ?? null;
 
     $ctx = requireClubPermission($pdo, $user, 'sessions.read');
-    $teamPlayerIds = scopedTeamPlayerIds($pdo, $ctx);
 
     if ($singleId) {
         $stmt = $pdo->prepare('SELECT * FROM matches WHERE id = ? AND club_id = ?');
@@ -100,9 +69,6 @@ if ($method === 'GET') {
         if (!$row) jsonOut(['error' => 'Match not found'], 404);
 
         normalizeMatch($row);
-        if (!matchInTeamScope($row, $ctx, $teamPlayerIds)) {
-            jsonOut(['error' => 'Match not found'], 404);
-        }
 
         // Include evaluations
         $ev = $pdo->prepare('SELECT * FROM coach_evaluations WHERE match_id = ?');
@@ -152,13 +118,6 @@ if ($method === 'GET') {
 
     foreach ($rows as &$r) { normalizeMatch($r); }
     unset($r);
-    if ($ctx['team_id'] !== null) {
-        $rows = array_values(array_filter(
-            $rows,
-            static fn(array $row): bool =>
-                matchInTeamScope($row, $ctx, $teamPlayerIds)
-        ));
-    }
 
     jsonOut(['matches' => $rows, 'count' => count($rows)]);
 }
@@ -281,29 +240,6 @@ if ($method === 'POST') {
 
     $playerIds    = $body['player_ids'] ?? [];
     $playerMinutes = $body['player_minutes'] ?? [];
-    if (is_string($playerIds)) $playerIds = json_decode($playerIds, true) ?? [];
-    $playerIds = is_array($playerIds)
-        ? array_values(array_unique(array_map('strval', $playerIds)))
-        : [];
-    if ($ctx['team_id'] !== null) {
-        $allowedPlayerIds = scopedTeamPlayerIds($pdo, $ctx);
-    } else {
-        $allowedStmt = $pdo->prepare(
-            'SELECT id FROM club_players WHERE club_id = ? AND is_active = 1'
-        );
-        $allowedStmt->execute([$ctx['club_id']]);
-        $allowedPlayerIds = array_values(array_unique(array_map(
-            'strval',
-            $allowedStmt->fetchAll(PDO::FETCH_COLUMN)
-        )));
-    }
-    $playerIds = array_values(array_intersect($playerIds, $allowedPlayerIds));
-    if (is_string($playerMinutes)) {
-        $playerMinutes = json_decode($playerMinutes, true) ?? [];
-    }
-    $playerMinutes = is_array($playerMinutes)
-        ? array_intersect_key($playerMinutes, array_fill_keys($playerIds, true))
-        : [];
     $competitionId = isset($body['competition_id']) && $body['competition_id'] !== ''
         ? (int)$body['competition_id'] : null;
 

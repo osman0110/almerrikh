@@ -41,19 +41,6 @@ function getAuthUser(PDO $pdo): array {
     return $user;
 }
 
-function playerTeamScope(PDO $pdo, array $ctx, string $alias = 'cp'): array {
-    if ($ctx['team_id'] === null) return ['', []];
-    $teamStmt = $pdo->prepare(
-        'SELECT name FROM club_teams WHERE id = ? AND club_id = ? AND is_active = 1'
-    );
-    $teamStmt->execute([(int)$ctx['team_id'], (int)$ctx['club_id']]);
-    $teamName = $teamStmt->fetchColumn() ?: '';
-    return [
-        " AND ($alias.team_id = ? OR ($alias.team_id IS NULL AND $alias.team_name = ?))",
-        [(int)$ctx['team_id'], $teamName],
-    ];
-}
-
 $method = $_SERVER['REQUEST_METHOD'];
 $user   = getAuthUser($pdo);
 
@@ -65,12 +52,8 @@ if ($method === 'GET') {
     // profile page. Same 'players.read' scope as everything else here.
     if ($filterId !== '' && ($_GET['status_history'] ?? '') === '1') {
         $ctx = requireClubPermission($pdo, $user, 'players.read');
-        [$teamSql, $teamParams] = playerTeamScope($pdo, $ctx, 'cp');
-        $ownStmt = $pdo->prepare(
-            'SELECT 1 FROM club_players cp
-             WHERE cp.id = ? AND cp.club_id = ?' . $teamSql
-        );
-        $ownStmt->execute([$filterId, $ctx['club_id'], ...$teamParams]);
+        $ownStmt = $pdo->prepare('SELECT 1 FROM club_players WHERE id = ? AND club_id = ?');
+        $ownStmt->execute([$filterId, $ctx['club_id']]);
         if (!$ownStmt->fetchColumn()) jsonOut(['error' => 'Not found'], 404);
 
         $stmt = $pdo->prepare(
@@ -88,19 +71,10 @@ if ($method === 'GET') {
     if ($filterId !== '') {
         // Scoped to the caller's club (any staff member — coach/doctor/analyst/admin/owner)
         $ctx = requireClubPermission($pdo, $user, 'players.read');
-        [$teamSql, $teamParams] = playerTeamScope($pdo, $ctx, 'cp');
         $stmt = $pdo->prepare(
-            "SELECT cp.*, ct.id AS resolved_team_id
-             FROM club_players cp
-             LEFT JOIN club_teams ct
-               ON ct.club_id = cp.club_id
-              AND ct.name = cp.team_name
-              AND ct.is_active = 1
-             WHERE cp.id = ? AND cp.club_id = ? AND cp.is_active = 1" .
-             $teamSql . "
-             LIMIT 1"
+            "SELECT * FROM club_players WHERE id = ? AND club_id = ? AND is_active = 1 LIMIT 1"
         );
-        $stmt->execute([$filterId, $ctx['club_id'], ...$teamParams]);
+        $stmt->execute([$filterId, $ctx['club_id']]);
         $rows = $stmt->fetchAll();
 
         foreach ($rows as &$r) {
@@ -141,21 +115,14 @@ if ($method === 'GET') {
     } else {
         // Coaches/admins/doctors/analysts see their club's players; never independent
         $ctx = requireClubPermission($pdo, $user, 'players.read');
-        [$teamSql, $teamParams] = playerTeamScope($pdo, $ctx, 'cp');
         $stmt = $pdo->prepare(
-            "SELECT cp.*, ct.id AS resolved_team_id
-             FROM club_players cp
-             LEFT JOIN club_teams ct
-               ON ct.club_id = cp.club_id
-              AND ct.name = cp.team_name
-              AND ct.is_active = 1
-             WHERE cp.club_id = ?
-               AND cp.is_active = 1
-               AND (cp.player_type IS NULL OR cp.player_type = 'club')" .
-               $teamSql . "
-             ORDER BY cp.name ASC"
+            "SELECT * FROM club_players
+             WHERE club_id = ?
+               AND is_active = 1
+               AND (player_type IS NULL OR player_type = 'club')
+             ORDER BY name ASC"
         );
-        $stmt->execute([$ctx['club_id'], ...$teamParams]);
+        $stmt->execute([$ctx['club_id']]);
     }
     $rows = $stmt->fetchAll();
     foreach ($rows as &$r) {
@@ -216,7 +183,6 @@ if ($method === 'POST') {
     if (!$canFullWrite) {
         if (!$existing) jsonOut(['error' => 'Forbidden — cannot create players'], 403);
         $body['name']         = $existing['name'];
-        $body['nickname']     = $existing['nickname'] ?? null;
         $body['number']       = $existing['number'];
         $body['position']     = $existing['position'];
         $body['team']         = $existing['team_name'];
@@ -231,9 +197,6 @@ if ($method === 'POST') {
         $body['password']     = '';
         $name = $existing['name'];
     }
-
-    $nickname = trim((string)($body['nickname'] ?? ''));
-    $nickname = $nickname !== '' ? $nickname : null;
 
     // ── Optional: coach provisions a direct login for this player ────────────
     // Only meaningful when the player has no linked account yet — never
@@ -288,14 +251,13 @@ if ($method === 'POST') {
 
     $stmt = $pdo->prepare(
         'INSERT INTO club_players
-             (id, user_id, club_id, name, nickname, number, position, team_name, category,
+             (id, user_id, club_id, name, number, position, team_name, category,
               dominant_foot, height_cm, weight_kg, date_of_birth, nationality,
               injury_notes, physical_notes, medical_notes, status, photo_url,
               expected_return_date, unavailable_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
              name                 = VALUES(name),
-             nickname             = VALUES(nickname),
              number               = VALUES(number),
              position             = VALUES(position),
              team_name            = VALUES(team_name),
@@ -322,7 +284,6 @@ if ($method === 'POST') {
         $ownerUserId,
         $ctx['club_id'],
         $name,
-        $nickname,
         $body['number']       ?? null,
         $body['position']     ?? null,
         $body['team']         ?? $body['team_name'] ?? null,

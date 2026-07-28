@@ -43,15 +43,7 @@ final class TrainingLoadWindowService
         }
 
         $dailyRecords = array_map(static function (array $day): array {
-            $issues = $day['data_quality_issues'] ?? [];
-            $complete = empty($issues);
-            if (!$complete && (int)($day['expected_records'] ?? 0) === 0) {
-                $blockingIssues = array_diff($issues, [
-                    TrainingLoadCalculator::DAY_HISTORICAL_UNKNOWN,
-                    TrainingLoadCalculator::DAY_UNKNOWN,
-                ]);
-                $complete = empty($blockingIssues);
-            }
+            $complete = empty($day['data_quality_issues']);
             return [
                 'date' => $day['date'],
                 'load' => $complete ? (float)$day['daily_load'] : null,

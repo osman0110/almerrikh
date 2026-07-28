@@ -87,26 +87,19 @@ $playerStmt = $pdo->prepare("
         COALESCE(cp.name, u.name, 'Unknown')    AS player_name,
         COALESCE(cp.position, '')               AS position,
         COALESCE(cp.team_name, '')              AS team_name,
-        pr.rpe_score AS post_rpe,
-        0 AS pain_reported,
-        NULL AS difficulty,
-        NULL AS mood_after,
+        ptf.post_rpe,
+        ptf.pain_reported,
+        ptf.difficulty,
+        ptf.mood_after,
         phi.hooper_score,
         phi.pre_rpe
     FROM session_players sp
     LEFT JOIN club_players cp ON cp.id = sp.linked_player_id
     LEFT JOIN users        u  ON u.id  = sp.player_user_id
-    LEFT JOIN player_rpe pr ON pr.id = (
-        SELECT id FROM player_rpe
-        WHERE session_id = sp.session_id
-          AND rpe_type = 'post'
-          AND is_active_record = 1
-          AND (
-              user_id = sp.player_user_id
-              OR (sp.linked_player_id IS NOT NULL
-                  AND linked_player_id = sp.linked_player_id)
-          )
-        ORDER BY submitted_at DESC LIMIT 1
+    LEFT JOIN post_training_feedback ptf ON ptf.id = (
+        SELECT id FROM post_training_feedback
+        WHERE session_id = sp.session_id AND player_user_id = sp.player_user_id
+        ORDER BY created_at DESC LIMIT 1
     )
     LEFT JOIN player_hooper_index phi ON phi.id = (
         SELECT id FROM player_hooper_index

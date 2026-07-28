@@ -8,7 +8,6 @@ final class FitnessConfig
 
     public const ACWR_FORMULA_VERSION = 'rolling_7_over_rolling_28_weekly_average_v1';
     public const ACWR_MIN_COMPLETE_DAYS = 28;
-    public const RPE_PLAYER_EDIT_WINDOW_MINUTES = 50;
 
     public static function timezone(): DateTimeZone
     {
@@ -23,7 +22,7 @@ final class FitnessConfig
     public static function acwrThresholds(): array
     {
         return [
-            'target_min' => 0.80,
+            'below_target_max' => 0.79,
             'in_target_max' => 1.30,
             'caution_max' => 1.50,
         ];

@@ -152,86 +152,31 @@ if ($method === 'PUT') {
     $stmt = $pdo->prepare('SELECT id, name FROM club_teams WHERE id = ? AND club_id = ? AND is_active = 1');
     $stmt->execute([$id, $cid]);
     $existing = $stmt->fetch();
-
-    // Legacy data may have a team name on players without a matching
-    // club_teams row. Those teams are included by GET and must remain editable.
-    $isImplicit = !$existing;
-    if ($isImplicit) {
-        $implicit = $pdo->prepare(
-            "SELECT team_name FROM club_players
-             WHERE club_id = ? AND team_name = ? AND is_active = 1 LIMIT 1"
-        );
-        $implicit->execute([$cid, $id]);
-        $implicitName = $implicit->fetchColumn();
-        if (!$implicitName) jsonOut(['error' => 'Team not found'], 404);
-        $existing = ['id' => null, 'name' => $implicitName];
-    }
+    if (!$existing) jsonOut(['error' => 'Team not found'], 404);
 
     $newName = trim($body['name'] ?? $existing['name']);
-    if (!$newName) jsonOut(['error' => 'Team name is required'], 422);
 
-    $dup = $pdo->prepare(
-        'SELECT id FROM club_teams WHERE club_id = ? AND name = ? AND is_active = 1'
-    );
-    $dup->execute([$cid, $newName]);
-    $duplicateId = $dup->fetchColumn();
-    if ($duplicateId && ($isImplicit || $duplicateId !== $id)) {
-        jsonOut(['error' => 'Team name already exists'], 409);
+    // If renaming, update all players that had the old team name
+    if ($newName !== $existing['name']) {
+        $pdo->prepare('UPDATE club_players SET team_name = ? WHERE club_id = ? AND team_name = ?')
+            ->execute([$newName, $cid, $existing['name']]);
     }
 
-    $savedId = $id;
-    $pdo->beginTransaction();
-    try {
-        if ($isImplicit) {
-            $savedId = bin2hex(random_bytes(16));
-            $ownerStmt = $pdo->prepare('SELECT owner_user_id FROM clubs WHERE id = ?');
-            $ownerStmt->execute([$cid]);
-            $ownerUserId = (int)($ownerStmt->fetchColumn() ?: $uid);
+    $pdo->prepare(
+        'UPDATE club_teams SET name = ?, category = ?, coach_name = ?, physical_coach_name = ?,
+         season = ?, notes = ? WHERE id = ? AND club_id = ?'
+    )->execute([
+        $newName,
+        $body['category']            ?? 'firstTeam',
+        $body['coach_name']          ?? '',
+        $body['physical_coach_name'] ?? '',
+        $body['season']              ?? '',
+        $body['notes']               ?? null,
+        $id,
+        $cid,
+    ]);
 
-            $pdo->prepare(
-                'INSERT INTO club_teams
-                 (id, user_id, club_id, name, category, coach_name, physical_coach_name, season, notes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            )->execute([
-                $savedId,
-                $ownerUserId,
-                $cid,
-                $newName,
-                $body['category']            ?? 'firstTeam',
-                $body['coach_name']          ?? '',
-                $body['physical_coach_name'] ?? '',
-                $body['season']              ?? '',
-                $body['notes']               ?? null,
-            ]);
-        } else {
-            $pdo->prepare(
-                'UPDATE club_teams SET name = ?, category = ?, coach_name = ?, physical_coach_name = ?,
-                 season = ?, notes = ? WHERE id = ? AND club_id = ?'
-            )->execute([
-                $newName,
-                $body['category']            ?? 'firstTeam',
-                $body['coach_name']          ?? '',
-                $body['physical_coach_name'] ?? '',
-                $body['season']              ?? '',
-                $body['notes']               ?? null,
-                $id,
-                $cid,
-            ]);
-        }
-
-        // Keep the player roster attached when the team is renamed.
-        if ($newName !== $existing['name']) {
-            $pdo->prepare(
-                'UPDATE club_players SET team_name = ? WHERE club_id = ? AND team_name = ?'
-            )->execute([$newName, $cid, $existing['name']]);
-        }
-        $pdo->commit();
-    } catch (Throwable $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
-        throw $e;
-    }
-
-    jsonOut(['success' => true, 'id' => $savedId]);
+    jsonOut(['success' => true]);
 }
 
 // ── DELETE — soft-delete team ─────────────────────────────────────────────────
@@ -242,45 +187,10 @@ if ($method === 'DELETE') {
     $id = $_GET['id'] ?? (json_decode(file_get_contents('php://input'), true)['id'] ?? '');
     if (!$id) jsonOut(['error' => 'id required'], 422);
 
-    $stmt = $pdo->prepare(
-        'SELECT id, name FROM club_teams WHERE id = ? AND club_id = ? AND is_active = 1'
-    );
-    $stmt->execute([$id, $cid]);
-    $team = $stmt->fetch();
+    $pdo->prepare('UPDATE club_teams SET is_active = 0 WHERE id = ? AND club_id = ?')
+        ->execute([$id, $cid]);
 
-    // An implicit legacy team uses its name as the temporary id returned by GET.
-    $teamName = $team ? $team['name'] : $id;
-    if (!$team) {
-        $implicit = $pdo->prepare(
-            "SELECT 1 FROM club_players
-             WHERE club_id = ? AND team_name = ? AND is_active = 1 LIMIT 1"
-        );
-        $implicit->execute([$cid, $teamName]);
-        if (!$implicit->fetchColumn()) jsonOut(['error' => 'Team not found'], 404);
-    }
-
-    $pdo->beginTransaction();
-    try {
-        if ($team) {
-            $pdo->prepare(
-                'UPDATE club_teams SET is_active = 0 WHERE id = ? AND club_id = ?'
-            )->execute([$id, $cid]);
-        }
-
-        // Deleting a team never deletes its players. Detach them so GET does
-        // not recreate the deleted team from their legacy team_name value.
-        $detach = $pdo->prepare(
-            'UPDATE club_players SET team_name = NULL WHERE club_id = ? AND team_name = ?'
-        );
-        $detach->execute([$cid, $teamName]);
-        $detachedPlayers = $detach->rowCount();
-        $pdo->commit();
-    } catch (Throwable $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
-        throw $e;
-    }
-
-    jsonOut(['success' => true, 'detached_players' => $detachedPlayers]);
+    jsonOut(['success' => true]);
 }
 
 jsonOut(['error' => 'Method not allowed'], 405);

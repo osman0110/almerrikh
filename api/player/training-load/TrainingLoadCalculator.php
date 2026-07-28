@@ -53,7 +53,7 @@ class TrainingLoadCalculator
         if ($rpeScore === null || $durationMinutes === null) return null;
         $rpe = (float)$rpeScore;
         $dur = (float)$durationMinutes;
-        if ($rpe < 0 || $rpe > 10 || $dur < 0) return null;
+        if ($rpe <= 0 || $dur < 0) return null;
         return $rpe * $dur;
     }
 
@@ -287,7 +287,7 @@ class TrainingLoadCalculator
         $stmt = $pdo->prepare(
             'SELECT id, session_id, session_type, rpe_score, duration_minutes,
                     actual_duration_minutes, completed_full_session, training_load,
-                    submitted_at, revision_number, last_edited_at' . $logicalSelect . '
+                    submitted_at' . $logicalSelect . '
              FROM player_rpe
              WHERE (linked_player_id = ? OR (linked_player_id IS NULL AND user_id = ?))
                AND submitted_at >= DATE_SUB(?, INTERVAL 1 DAY)
@@ -431,7 +431,7 @@ class TrainingLoadCalculator
             }
 
             $rpeValid      = $row['rpe_score'] !== null
-                && (float)$row['rpe_score'] >= 0
+                && (float)$row['rpe_score'] >= 1
                 && (float)$row['rpe_score'] <= 10;
             $durationValid = $effectiveDuration !== null && (float)$effectiveDuration > 0
                 && ($row['duration_minutes'] !== null || $durationFromExposure);
@@ -451,10 +451,6 @@ class TrainingLoadCalculator
                 'actual_duration_minutes' => $durationValid ? (int)$effectiveDuration : null,
                 'session_load'    => $sessionLoad,
                 'submitted_at'    => $row['submitted_at'],
-                'record_status'   => (int)($row['revision_number'] ?? 1) > 1
-                    ? 'edited'
-                    : 'original',
-                'last_edited_at'  => $row['last_edited_at'] ?? null,
                 'rpe_valid'       => $rpeValid,
                 'duration_valid'  => $durationValid,
                 'rpe_issue'       => $row['rpe_score'] === null ? 'MISSING_RPE' : ($rpeValid ? null : 'INVALID_RPE'),

@@ -14,30 +14,26 @@ require_once __DIR__ . '/fitness/SchemaInspector.php';
 // Falls back to users.club_id + 'owner' for legacy accounts that predate
 // the club_staff table, so existing single-owner clubs keep working.
 function resolveClubContext(PDO $pdo, array $user): array {
-    if (SchemaInspector::hasTable($pdo, 'club_staff')) {
-        $hasTeamScope = SchemaInspector::hasColumn($pdo, 'club_staff', 'team_id');
-        $stmt = $pdo->prepare(
-            'SELECT club_id, staff_role' . ($hasTeamScope ? ', team_id' : '') . " FROM club_staff
-             WHERE user_id = ? AND status = 'active' LIMIT 1"
-        );
-        $stmt->execute([$user['id']]);
-        $row = $stmt->fetch();
-        if ($row) {
-            return [
-                'club_id' => (int)$row['club_id'],
-                'staff_role' => $row['staff_role'],
-                'team_id' => $hasTeamScope && $row['team_id'] !== null ? (int)$row['team_id'] : null,
-            ];
-        }
+    $hasTeamScope = SchemaInspector::hasColumn($pdo, 'club_staff', 'team_id');
+    $stmt = $pdo->prepare(
+        'SELECT club_id, staff_role' . ($hasTeamScope ? ', team_id' : '') . " FROM club_staff
+         WHERE user_id = ? AND status = 'active' LIMIT 1"
+    );
+    $stmt->execute([$user['id']]);
+    $row = $stmt->fetch();
+    if ($row) {
+        return [
+            'club_id' => (int)$row['club_id'],
+            'staff_role' => $row['staff_role'],
+            'team_id' => $hasTeamScope && $row['team_id'] !== null ? (int)$row['team_id'] : null,
+        ];
     }
 
-    if (SchemaInspector::hasColumn($pdo, 'users', 'club_id')) {
-        $legacy = $pdo->prepare('SELECT club_id FROM users WHERE id = ?');
-        $legacy->execute([$user['id']]);
-        $clubId = $legacy->fetchColumn();
-        if ($clubId) {
-            return ['club_id' => (int)$clubId, 'staff_role' => 'owner', 'team_id' => null];
-        }
+    $legacy = $pdo->prepare('SELECT club_id FROM users WHERE id = ?');
+    $legacy->execute([$user['id']]);
+    $clubId = $legacy->fetchColumn();
+    if ($clubId) {
+        return ['club_id' => (int)$clubId, 'staff_role' => 'owner', 'team_id' => null];
     }
 
     return ['club_id' => null, 'staff_role' => null, 'team_id' => null];
@@ -102,7 +98,6 @@ function clubStaffCan(string $staffRole, string $action): bool {
             'notes.read',
             'teams.read',
             'seasons.read', 'competitions.read',
-            'daily_readiness.read',
             'tasks.view',
         ],
         'performance_manager' => [
@@ -167,7 +162,6 @@ function clubStaffCan(string $staffRole, string $action): bool {
             'notes.read',
             'teams.read',
             'seasons.read', 'competitions.read',
-            'daily_readiness.read',
             'tasks.view', 'tasks.manage',
             'fitness.training_load.view',
         ],

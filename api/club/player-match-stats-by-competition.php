@@ -42,31 +42,19 @@ $cid = (int)$ctx['club_id'];
 $playerId = trim($_GET['player_id'] ?? '');
 if (!$playerId) jsonOut(['error' => 'player_id is required'], 400);
 
-$seasonId = isset($_GET['season_id']) && $_GET['season_id'] !== ''
-    ? (int)$_GET['season_id'] : null;
-$competitionId = isset($_GET['competition_id']) && $_GET['competition_id'] !== ''
-    ? (int)$_GET['competition_id'] : null;
 $to   = trim($_GET['to']   ?? '') ?: date('Y-m-d');
 $from = trim($_GET['from'] ?? '') ?: date('Y-m-d', strtotime('-365 days', strtotime($to)));
 
 // ── Participation rollup per competition ────────────────────────────────────
-$partSql =
+$partStmt = $pdo->prepare(
     'SELECT COALESCE(c.id, 0) AS competition_id, COALESCE(c.name, "أخرى") AS competition_name,
             mp.starter, mp.played, mp.minutes_played, mp.goals, mp.assists
      FROM match_participations mp
      JOIN matches m ON m.id = mp.match_id
      LEFT JOIN club_competitions c ON c.id = m.competition_id
-     WHERE m.club_id = ? AND mp.player_id = ? AND m.match_date BETWEEN ? AND ?';
-$partParams = [$cid, $playerId, $from, $to];
-if ($competitionId !== null) {
-    $partSql .= ' AND m.competition_id = ?';
-    $partParams[] = $competitionId;
-} elseif ($seasonId !== null) {
-    $partSql .= ' AND c.season_id = ?';
-    $partParams[] = $seasonId;
-}
-$partStmt = $pdo->prepare($partSql);
-$partStmt->execute($partParams);
+     WHERE m.club_id = ? AND mp.player_id = ? AND m.match_date BETWEEN ? AND ?'
+);
+$partStmt->execute([$cid, $playerId, $from, $to]);
 
 $byCompetition = [];
 $ensure = function (int $id, string $name) use (&$byCompetition) {
@@ -100,24 +88,16 @@ foreach ($partStmt->fetchAll() as $r) {
 }
 
 // ── Cards per competition ────────────────────────────────────────────────────
-$cardSql =
+$cardStmt = $pdo->prepare(
     'SELECT COALESCE(c.id, 0) AS competition_id, COALESCE(c.name, "أخرى") AS competition_name,
             mc.card_type, COUNT(*) AS cnt
      FROM match_cards mc
      JOIN matches m ON m.id = mc.match_id
      LEFT JOIN club_competitions c ON c.id = m.competition_id
-     WHERE m.club_id = ? AND mc.player_id = ? AND m.match_date BETWEEN ? AND ?';
-$cardParams = [$cid, $playerId, $from, $to];
-if ($competitionId !== null) {
-    $cardSql .= ' AND m.competition_id = ?';
-    $cardParams[] = $competitionId;
-} elseif ($seasonId !== null) {
-    $cardSql .= ' AND c.season_id = ?';
-    $cardParams[] = $seasonId;
-}
-$cardSql .= ' GROUP BY competition_id, competition_name, mc.card_type';
-$cardStmt = $pdo->prepare($cardSql);
-$cardStmt->execute($cardParams);
+     WHERE m.club_id = ? AND mc.player_id = ? AND m.match_date BETWEEN ? AND ?
+     GROUP BY competition_id, competition_name, mc.card_type'
+);
+$cardStmt->execute([$cid, $playerId, $from, $to]);
 
 foreach ($cardStmt->fetchAll() as $r) {
     $id = (int)$r['competition_id'];
@@ -131,9 +111,6 @@ usort($result, fn($a, $b) => $b['total_minutes'] <=> $a['total_minutes']);
 
 jsonOut([
     'player_id'     => $playerId,
-    'filters'       => [
-        'season_id' => $seasonId, 'competition_id' => $competitionId,
-        'from' => $from, 'to' => $to,
-    ],
+    'range'         => ['from' => $from, 'to' => $to],
     'competitions'  => $result,
 ]);

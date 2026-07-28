@@ -11,7 +11,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once 'db.php';
 require_once 'includes/club_auth.php';
-require_once 'includes/audit_log.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -109,31 +108,19 @@ if ($method === 'GET') {
         // Club staff (coach/doctor/analyst/physio/...): scoped to the whole club,
         // not just the account that happens to be logged in.
         $ctx = requireClubPermission($pdo, $user, 'assessments.read');
-        $teamFilter = $ctx['team_id'] !== null
-            ? ' AND COALESCE(cp.team_id, ct.id) = ?'
-            : '';
-        $teamParams = $ctx['team_id'] !== null ? [(int)$ctx['team_id']] : [];
         $playerId = $_GET['player_id'] ?? null;
         if ($playerId) {
             $stmt = $pdo->prepare(
-                'SELECT a.* FROM assessments a
-                 JOIN club_players cp ON cp.id = a.player_id AND cp.club_id = a.club_id
-                 LEFT JOIN club_teams ct
-                   ON ct.club_id = cp.club_id AND ct.name = cp.team_name AND ct.is_active = 1
-                 WHERE a.club_id = ? AND a.player_id = ?' . $teamFilter . '
-                 ORDER BY a.created_at DESC LIMIT ' . $limit
+                'SELECT * FROM assessments WHERE club_id = ? AND player_id = ?
+                 ORDER BY created_at DESC LIMIT ' . $limit
             );
-            $stmt->execute([$ctx['club_id'], $playerId, ...$teamParams]);
+            $stmt->execute([$ctx['club_id'], $playerId]);
         } else {
             $stmt = $pdo->prepare(
-                'SELECT a.* FROM assessments a
-                 JOIN club_players cp ON cp.id = a.player_id AND cp.club_id = a.club_id
-                 LEFT JOIN club_teams ct
-                   ON ct.club_id = cp.club_id AND ct.name = cp.team_name AND ct.is_active = 1
-                 WHERE a.club_id = ?' . $teamFilter . '
-                 ORDER BY a.created_at DESC LIMIT ' . $limit
+                'SELECT * FROM assessments WHERE club_id = ?
+                 ORDER BY created_at DESC LIMIT ' . $limit
             );
-            $stmt->execute([$ctx['club_id'], ...$teamParams]);
+            $stmt->execute([$ctx['club_id']]);
         }
     }
 
@@ -290,81 +277,37 @@ if ($method === 'GET') {
         jsonOut(['error' => 'id, player_id and type are required'], 400);
     }
 
-    $existingAssessmentStmt = $pdo->prepare(
-        'SELECT overall_score, status, session_id, type
-         FROM assessments WHERE id = ?'
-    );
-    $existingAssessmentStmt->execute([$id]);
-    $existingAssessment = $existingAssessmentStmt->fetch(PDO::FETCH_ASSOC) ?: null;
-
     // Coaches: verify player belongs to their club (players: player_id comes from DB in GET, skip check)
     $callerInfo2 = $pdo->prepare('SELECT player_type FROM users WHERE id = ?');
     $callerInfo2->execute([$user['id']]);
     $isPlayer2 = !empty($callerInfo2->fetch()['player_type']);
     $playerClubId = null;
-    $playerTeamId = null;
     if (!$isPlayer2) {
         $ctxWrite = requireClubPermission($pdo, $user, 'assessments.write');
-        $ownerCheck = $pdo->prepare(
-            'SELECT cp.club_id, COALESCE(cp.team_id, ct.id) AS resolved_team_id
-             FROM club_players cp
-             LEFT JOIN club_teams ct
-               ON ct.club_id = cp.club_id AND ct.name = cp.team_name AND ct.is_active = 1
-             WHERE cp.id = ? AND cp.club_id = ?'
-        );
+        $ownerCheck = $pdo->prepare('SELECT club_id FROM club_players WHERE id = ? AND club_id = ?');
         $ownerCheck->execute([$playerId, $ctxWrite['club_id']]);
         $ownerRow = $ownerCheck->fetch();
-        if (
-            !$ownerRow
-            || (
-                $ctxWrite['team_id'] !== null
-                && (int)($ownerRow['resolved_team_id'] ?? 0) !== (int)$ctxWrite['team_id']
-            )
-        ) {
+        if (!$ownerRow) {
             jsonOut(['error' => 'Forbidden — player not in your club'], 403);
         }
         $playerClubId = $ownerRow['club_id'];
-        $playerTeamId = $ownerRow['resolved_team_id'] !== null
-            ? (int)$ownerRow['resolved_team_id']
-            : null;
     } else {
-        $pcStmt = $pdo->prepare('SELECT club_id, team_id FROM club_players WHERE id = ?');
+        $pcStmt = $pdo->prepare('SELECT club_id FROM club_players WHERE id = ?');
         $pcStmt->execute([$playerId]);
-        $playerRow = $pcStmt->fetch(PDO::FETCH_ASSOC);
-        $playerClubId = $playerRow['club_id'] ?? null;
-        $playerTeamId = isset($playerRow['team_id']) ? (int)$playerRow['team_id'] : null;
-    }
-
-    if ($sessionId !== null && $playerClubId !== null) {
-        $sessionCheck = $pdo->prepare(
-            'SELECT 1 FROM club_sessions cs
-             LEFT JOIN club_teams ct
-               ON ct.club_id = cs.club_id AND ct.name = cs.team_name AND ct.is_active = 1
-             WHERE cs.id = ? AND cs.club_id = ?' .
-             ($playerTeamId !== null ? ' AND COALESCE(cs.team_id, ct.id) = ?' : '')
-        );
-        $sessionCheck->execute([
-            $sessionId,
-            $playerClubId,
-            ...($playerTeamId !== null ? [$playerTeamId] : []),
-        ]);
-        if (!$sessionCheck->fetchColumn()) {
-            jsonOut(['error' => 'Session not found for player team'], 404);
-        }
+        $playerClubId = $pcStmt->fetchColumn() ?: null;
     }
 
     $stmt = $pdo->prepare(
         'INSERT INTO assessments
-             (id, user_id, club_id, team_id, player_id, player_name, type, session_id,
+             (id, user_id, club_id, player_id, player_name, type, session_id,
               overall_score, movement_quality_score, stability_score,
               symmetry_score, control_score, quality_score,
               issues_json, tips_json, drills_json, angle_metrics_json, notes,
               pre_hooper_index, pre_rpe, post_rpe, pain_reported, difficulty, mood_after,
               attempt_group_id, attempt_number, is_valid, invalid_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
              club_id                = COALESCE(VALUES(club_id),          club_id),
-             team_id                = COALESCE(VALUES(team_id),          team_id),
              session_id             = COALESCE(VALUES(session_id),       session_id),
              overall_score          = VALUES(overall_score),
              movement_quality_score = VALUES(movement_quality_score),
@@ -389,37 +332,12 @@ if ($method === 'GET') {
              invalid_reason         = VALUES(invalid_reason)'
     );
     $stmt->execute([
-        $id, $user['id'], $playerClubId, $playerTeamId,
-        $playerId, $playerName, $type, $sessionId,
+        $id, $user['id'], $playerClubId, $playerId, $playerName, $type, $sessionId,
         $overall, $movement, $stability, $symmetry, $control, $quality,
         $issues, $tips, $drills, $metrics, $notes,
         $preHooper, $preRpe, $postRpe, $painReport, $difficulty, $moodAfter,
         $attemptGroupId, $attemptNumber, $isValid, $invalidReason,
     ]);
-
-    logFitnessAudit(
-        $pdo,
-        'assessments',
-        $id,
-        $existingAssessment ? 'assessment.update' : 'assessment.create',
-        (int)$user['id'],
-        $playerClubId !== null ? (int)$playerClubId : null,
-        $playerId,
-        $existingAssessment ? [
-            'overall_score' => (int)$existingAssessment['overall_score'],
-            'status' => $existingAssessment['status'] ?? 'pending_review',
-            'session_id' => $existingAssessment['session_id'] ?? null,
-            'type' => $existingAssessment['type'] ?? $type,
-        ] : null,
-        [
-            'overall_score' => $overall,
-            'status' => $existingAssessment['status'] ?? 'pending_review',
-            'session_id' => $sessionId,
-            'type' => $type,
-        ],
-        null,
-        isset($body['operation_id']) ? (string)$body['operation_id'] : null
-    );
 
     // Stamp the player's last_assessment_at so dashboard KPI stays fresh
     if ($playerId && $playerClubId) {

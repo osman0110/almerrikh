@@ -57,7 +57,7 @@ final class AcwrCalculator
     private static function classify(float $ratio): string
     {
         $thresholds = FitnessConfig::acwrThresholds();
-        if ($ratio < $thresholds['target_min']) return 'BELOW_TARGET';
+        if ($ratio <= $thresholds['below_target_max']) return 'BELOW_TARGET';
         if ($ratio <= $thresholds['in_target_max']) return 'IN_TARGET';
         if ($ratio <= $thresholds['caution_max']) return 'CAUTION';
         return 'ABOVE_TARGET';

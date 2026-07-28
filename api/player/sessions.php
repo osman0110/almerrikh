@@ -11,8 +11,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once '../db.php';
 require_once '../includes/club_auth.php';
-require_once '../includes/fitness/FitnessConfig.php';
-require_once '../includes/fitness/SchemaInspector.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -78,18 +76,7 @@ $rows = $stmt->fetchAll();
 // Has this player already submitted Hooper/RPE for this session? Used to
 // hide the entry button and lock the one-time submission client-side.
 $hooperStmt = $pdo->prepare('SELECT id FROM player_hooper_index WHERE user_id = ? AND session_id = ? LIMIT 1');
-$activeRpeFilter = SchemaInspector::hasColumn($pdo, 'player_rpe', 'is_active_record')
-    ? ' AND is_active_record = 1'
-    : '';
-$rpeStmt = $pdo->prepare(
-    'SELECT id, TIMESTAMPDIFF(MINUTE, submitted_at, NOW()) <= '
-        . FitnessConfig::RPE_PLAYER_EDIT_WINDOW_MINUTES . ' AS editable
-     FROM player_rpe
-     WHERE (user_id = ? OR linked_player_id = ?)
-       AND session_id = ? AND rpe_type = \'post\''
-       . $activeRpeFilter . '
-     ORDER BY submitted_at DESC LIMIT 1'
-);
+$rpeStmt    = $pdo->prepare('SELECT id FROM player_rpe WHERE user_id = ? AND session_id = ? AND rpe_type = \'post\' LIMIT 1');
 
 foreach ($rows as &$r) {
     $r['player_ids']           = $r['player_ids'] && $r['player_ids'] !== 'null'
@@ -100,10 +87,8 @@ foreach ($rows as &$r) {
 
     $hooperStmt->execute([$user['id'], $r['id']]);
     $r['wellness_done'] = (bool)$hooperStmt->fetchColumn();
-    $rpeStmt->execute([$user['id'], $player['id'], $r['id']]);
-    $rpeRow = $rpeStmt->fetch(PDO::FETCH_ASSOC);
-    $r['rpe_done'] = (bool)$rpeRow;
-    $r['rpe_editable'] = $rpeRow ? (bool)$rpeRow['editable'] : false;
+    $rpeStmt->execute([$user['id'], $r['id']]);
+    $r['rpe_done'] = (bool)$rpeStmt->fetchColumn();
 }
 unset($r);
 

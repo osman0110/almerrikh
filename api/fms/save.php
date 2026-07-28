@@ -53,18 +53,8 @@ if (!$playerId) jsonOut(['error' => 'player_id is required'], 400);
 
 // Ownership check — scoped to the caller's club, not just the owner account
 $ctx = requireClubPermission($pdo, $user, 'assessments.write');
-$ownerStmt = $pdo->prepare(
-    'SELECT cp.name FROM club_players cp
-     LEFT JOIN club_teams ct
-       ON ct.club_id = cp.club_id AND ct.name = cp.team_name AND ct.is_active = 1
-     WHERE cp.id = ? AND cp.club_id = ?' .
-     ($ctx['team_id'] !== null ? ' AND COALESCE(cp.team_id, ct.id) = ?' : '')
-);
-$ownerStmt->execute([
-    $playerId,
-    $ctx['club_id'],
-    ...($ctx['team_id'] !== null ? [(int)$ctx['team_id']] : []),
-]);
+$ownerStmt = $pdo->prepare('SELECT name FROM club_players WHERE id = ? AND club_id = ?');
+$ownerStmt->execute([$playerId, $ctx['club_id']]);
 $player = $ownerStmt->fetch(PDO::FETCH_ASSOC);
 if (!$player) jsonOut(['error' => 'Forbidden — player not in your club'], 403);
 

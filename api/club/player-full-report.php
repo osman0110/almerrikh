@@ -15,8 +15,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once dirname(__DIR__) . '/db.php';
 require_once dirname(__DIR__) . '/includes/club_auth.php';
-require_once dirname(__DIR__) . '/includes/fitness/FitnessConfig.php';
-require_once dirname(__DIR__) . '/includes/fitness/TrainingLoadWindowService.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -70,22 +68,6 @@ if (!$player) jsonOut(['success' => false, 'message' => 'Player not found'], 404
 $today = date('Y-m-d');
 $from30 = date('Y-m-d', strtotime('-30 days'));
 $from90 = date('Y-m-d', strtotime('-90 days'));
-
-// ── Rolling training load / ACWR ─────────────────────────────────────────────
-$trainingLoadWindow = TrainingLoadWindowService::build(
-    $pdo,
-    (int)($player['linked_user_id'] ?? 0),
-    (string)$playerId,
-    FitnessConfig::today()
-);
-$acwrDetails = $trainingLoadWindow['acwr_details'];
-$trainingLoad = [
-    'acute_load_7d' => $acwrDetails['acute_load_7d'],
-    'chronic_load_weekly_average' => $acwrDetails['chronic_weekly_average'],
-    'acwr' => $acwrDetails['acwr'],
-    'classification' => $acwrDetails['classification'],
-    'data_completeness' => $acwrDetails['data_completeness'],
-];
 
 // ── Latest readiness check-in ────────────────────────────────────────────────
 $readiness = null;
@@ -175,7 +157,6 @@ jsonOut([
         'sleep_quality' => (int)$readiness['sleep_quality'],
         'submitted_at'  => $readiness['submitted_at'],
     ] : null,
-    'training_load' => $trainingLoad,
     'training_30d' => $attendance,
     'matches_90d' => [
         'appearances' => $appearances,

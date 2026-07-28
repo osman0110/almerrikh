@@ -367,9 +367,12 @@ switch ($action) {
             jsonOut(['error' => 'Email or phone is already registered'], 409);
         }
 
-        // Player join codes remain reusable. Staff invitations are single-use
-        // and valid for 72 hours, with the code's account_type overriding the
-        // role sent by the client.
+        // ── Access code (unified — one reusable code covers players AND staff) ──
+        // A code is the single source of truth for what this join grants: it's
+        // never single-use (no expiry, no "used" flag) — a club hands out one
+        // code per account type and reuses it for every player/staff member
+        // until they deactivate or delete it. The code's account_type always
+        // overrides whatever role/player_type the client sent.
         $accessCode = null;
         if ($inviteCode) {
             $codeStmt = $pdo->prepare('SELECT * FROM club_access_codes WHERE code = ? AND is_active = 1');
@@ -377,13 +380,6 @@ switch ($action) {
             $accessCode = $codeStmt->fetch();
             if (!$accessCode) {
                 jsonOut(['error' => 'Invalid or inactive invite code'], 400);
-            }
-            if ($accessCode['account_type'] !== 'player') {
-                $staffInviteExpired =
-                    strtotime($accessCode['created_at']) < strtotime('-72 hours');
-                if ((int)$accessCode['use_count'] > 0 || $staffInviteExpired) {
-                    jsonOut(['error' => 'Staff invitation is used or expired'], 400);
-                }
             }
             $role       = $accessCode['account_type'] === 'player' ? 'player' : 'staff';
             $playerType = $accessCode['account_type'] === 'player' ? 'club'   : '';
@@ -467,16 +463,11 @@ switch ($action) {
             }
         }
 
-        // Staff invitations are consumed after one registration. Player join
-        // codes stay reusable for roster onboarding.
+        // ── Access code usage stats — the code stays active/reusable; we only
+        // track how many times and when it was last used, never consume it. ──
         if ($accessCode) {
-            $pdo->prepare(
-                'UPDATE club_access_codes
-                 SET use_count = use_count + 1,
-                     last_used_at = NOW(),
-                     is_active = CASE WHEN account_type = "player" THEN is_active ELSE 0 END
-                 WHERE code = ?'
-            )->execute([$inviteCode]);
+            $pdo->prepare('UPDATE club_access_codes SET use_count = use_count + 1, last_used_at = NOW() WHERE code = ?')
+                ->execute([$inviteCode]);
         }
 
         if ($needsApproval) {

@@ -69,19 +69,12 @@ if ($method === 'GET') {
     $date = trim($_GET['date'] ?? date('Y-m-d'));
 
     $roster = $pdo->prepare(
-        'SELECT cp.id, cp.name, cp.position, cp.linked_user_id, cp.status,
-                cp.unavailable_reason, cp.expected_return_date
-         FROM club_players cp
-         LEFT JOIN club_teams ct
-           ON ct.club_id = cp.club_id AND ct.name = cp.team_name AND ct.is_active = 1
-         WHERE cp.club_id = ? AND cp.is_active = 1 AND cp.player_type = "club"' .
-         ($ctx['team_id'] !== null ? ' AND COALESCE(cp.team_id, ct.id) = ?' : '') . '
-         ORDER BY cp.name ASC'
+        'SELECT id, name, position, linked_user_id, status, unavailable_reason, expected_return_date
+         FROM club_players
+         WHERE club_id = ? AND is_active = 1 AND player_type = "club"
+         ORDER BY name ASC'
     );
-    $roster->execute([
-        $ctx['club_id'],
-        ...($ctx['team_id'] !== null ? [(int)$ctx['team_id']] : []),
-    ]);
+    $roster->execute([$ctx['club_id']]);
     $players = $roster->fetchAll(PDO::FETCH_ASSOC);
 
     $linkedUserIds = array_values(array_filter(array_column($players, 'linked_user_id')));
@@ -201,18 +194,8 @@ if ($method === 'POST') {
         $playerId = trim($body['player_id'] ?? '');
         if (!$playerId) jsonOut(['success' => false, 'message' => 'player_id is required'], 400);
 
-        $ownStmt = $pdo->prepare(
-            'SELECT 1 FROM club_players cp
-             LEFT JOIN club_teams ct
-               ON ct.club_id = cp.club_id AND ct.name = cp.team_name AND ct.is_active = 1
-             WHERE cp.id = ? AND cp.club_id = ?' .
-             ($ctx['team_id'] !== null ? ' AND COALESCE(cp.team_id, ct.id) = ?' : '')
-        );
-        $ownStmt->execute([
-            $playerId,
-            $ctx['club_id'],
-            ...($ctx['team_id'] !== null ? [(int)$ctx['team_id']] : []),
-        ]);
+        $ownStmt = $pdo->prepare('SELECT 1 FROM club_players WHERE id = ? AND club_id = ?');
+        $ownStmt->execute([$playerId, $ctx['club_id']]);
         if (!$ownStmt->fetchColumn()) jsonOut(['success' => false, 'message' => 'Player not found'], 404);
 
         $date = trim($body['decision_date'] ?? date('Y-m-d'));

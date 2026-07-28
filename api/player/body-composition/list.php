@@ -75,36 +75,18 @@ $sql = 'SELECT a.*, cp.name AS player_name, cp.photo_url AS player_photo_url
         WHERE ' . implode(' AND ', $where);
 
 if ($latestOnly) {
-    // Select each player's latest assessment *inside the requested period*.
-    // Previously the subquery selected the all-time latest row first, so a
-    // newer measurement outside the filter hid valid measurements within it.
-    $latestWhere = [
-        'deleted_at IS NULL',
-        'club_id = ?',
-        'linked_player_id IS NOT NULL',
-    ];
-    $latestParams = [(int)$ctx['club_id']];
-    if (!empty($_GET['date_from'])) {
-        $latestWhere[] = 'assessment_date >= ?';
-        $latestParams[] = (string)$_GET['date_from'];
-    }
-    if (!empty($_GET['date_to'])) {
-        $latestWhere[] = 'assessment_date <= ?';
-        $latestParams[] = (string)$_GET['date_to'];
-    }
-
     $sql = 'SELECT a.*, cp.name AS player_name, cp.photo_url AS player_photo_url
             FROM player_body_composition_assessments a
             LEFT JOIN club_players cp ON cp.id = a.linked_player_id
             INNER JOIN (
                 SELECT linked_player_id, MAX(CONCAT(assessment_date, \' \', created_at)) AS max_key
                 FROM player_body_composition_assessments
-                WHERE ' . implode(' AND ', $latestWhere) . '
+                WHERE deleted_at IS NULL AND club_id = ? AND linked_player_id IS NOT NULL
                 GROUP BY linked_player_id
             ) latest ON latest.linked_player_id = a.linked_player_id
                     AND CONCAT(a.assessment_date, \' \', a.created_at) = latest.max_key
             WHERE ' . implode(' AND ', $where);
-    $params = array_merge($latestParams, $params);
+    $params = array_merge([(int)$ctx['club_id']], $params);
 }
 
 $countStmt = $pdo->prepare(str_replace('SELECT a.*, cp.name AS player_name, cp.photo_url AS player_photo_url', 'SELECT COUNT(*) AS c', $sql));
@@ -147,24 +129,16 @@ if ($latestOnly && !isset($_GET['created_by'])) {
 
     foreach ($rosterStmt->fetchAll(PDO::FETCH_ASSOC) as $player) {
         if (in_array($player['id'], $presentPlayerIds, true)) continue;
-        $measurement = null;
-        $history = BodyCompositionRepository::historyForPlayer(
+        $measurement = BodyCompositionRepository::latestForPlayer(
             $pdo,
             $player['id'],
             $player['linked_user_id'] !== null ? (int)$player['linked_user_id'] : null,
-            100,
-            false
+            true
         );
-        foreach ($history as $candidate) {
-            if (($candidate['source_system'] ?? null) !== 'LEGACY_SYSTEM') continue;
-            $candidateDate = substr((string)($candidate['measured_at'] ?? ''), 0, 10);
-            if (!empty($_GET['date_from']) && $candidateDate < (string)$_GET['date_from']) continue;
-            if (!empty($_GET['date_to']) && $candidateDate > (string)$_GET['date_to']) continue;
-            $measurement = $candidate;
-            break;
-        }
-        if (!$measurement) continue;
+        if (!$measurement || $measurement['source_system'] !== 'LEGACY_SYSTEM') continue;
         $date = substr((string)$measurement['measured_at'], 0, 10);
+        if (!empty($_GET['date_from']) && $date < (string)$_GET['date_from']) continue;
+        if (!empty($_GET['date_to']) && $date > (string)$_GET['date_to']) continue;
         if (!empty($_GET['assessment_type'])) continue;
         $bodyFat = $measurement['body_fat_percentage'];
         if (isset($_GET['body_fat_min']) && $_GET['body_fat_min'] !== ''

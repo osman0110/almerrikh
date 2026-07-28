@@ -53,13 +53,6 @@ if (in_array($user['role'] ?? '', ['player', 'parent'], true)) {
 $ctx  = requireClubPermission($pdo, $user, 'admin_dashboard.read');
 $cid  = (int)$ctx['club_id'];
 $date = trim($_GET['date'] ?? date('Y-m-d'));
-if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-    jsonOut(['success' => false, 'message' => 'Invalid date'], 400);
-}
-$parsedDate = DateTimeImmutable::createFromFormat('!Y-m-d', $date);
-if (!$parsedDate || $parsedDate->format('Y-m-d') !== $date) {
-    jsonOut(['success' => false, 'message' => 'Invalid date'], 400);
-}
 $rangeTo   = $date;
 $rangeFrom = date('Y-m-d', strtotime('-30 days', strtotime($rangeTo)));
 
@@ -100,21 +93,13 @@ $compositeCounts = [
     'ready' => 0, 'ready_with_note' => 0, 'high_strain' => 0,
     'injured' => 0, 'rehab' => 0, 'incomplete_data' => 0,
 ];
-$playersCheckedIn = 0;
 foreach ($players as $p) {
     $userId = $p['linked_user_id'] ? (int)$p['linked_user_id'] : null;
     $hooper = $userId && isset($hooperByUser[$userId]) ? $hooperByUser[$userId] : null;
-    if ($hooper !== null) $playersCheckedIn++;
     $decision = $decisionByPlayer[$p['id']] ?? null;
     $status = computePlayerCompositeStatus($p['status'], $hooper, $decision);
     $compositeCounts[$status]++;
 }
-
-$readyCount = $compositeCounts['ready'];
-$followUpCount = $compositeCounts['ready_with_note']
-    + $compositeCounts['high_strain']
-    + $compositeCounts['incomplete_data'];
-$unavailableCount = $compositeCounts['injured'] + $compositeCounts['rehab'];
 
 // ── Rolling minutes + cards totals (last 30 days, club-wide) ────────────────
 $totalMinutes = 0;
@@ -155,20 +140,6 @@ $stmt = $pdo->prepare(
 $stmt->execute([$cid, $date]);
 $physioSessionsToday = (int)$stmt->fetchColumn();
 
-$overdueTasks = 0;
-$tasksAvailable = SchemaInspector::hasTable($pdo, 'tasks');
-if ($tasksAvailable) {
-    $stmt = $pdo->prepare(
-        'SELECT COUNT(*) FROM tasks
-         WHERE club_id = ?
-           AND due_date IS NOT NULL
-           AND due_date < ?
-           AND status NOT IN ("completed", "cancelled")'
-    );
-    $stmt->execute([$cid, $date]);
-    $overdueTasks = (int)$stmt->fetchColumn();
-}
-
 // ── Upcoming matches/sessions (next 5, combined, from today forward) ────────
 $upcoming = [];
 $stmt = $pdo->prepare(
@@ -192,45 +163,8 @@ $upcoming = array_slice($upcoming, 0, 5);
 
 jsonOut([
     'success'          => true,
-    'generated_at'     => date(DATE_ATOM),
     'date'             => $date,
     'composite_counts' => $compositeCounts,
-    'today_summary'    => [
-        'ready'           => $readyCount,
-        'needs_follow_up' => $followUpCount,
-        'unavailable'     => $unavailableCount,
-        'total_players'   => count($players),
-    ],
-    'data_quality'     => [
-        'total_players'      => count($players),
-        'players_checked_in' => $playersCheckedIn,
-        'missing_check_in'   => $compositeCounts['incomplete_data'],
-        'tasks_available'    => $tasksAvailable,
-    ],
-    'attention_items'  => [
-        [
-            'type' => 'injuries',
-            'count' => $openInjuryCases,
-            'route' => '/club/players',
-            'filter' => 'injured',
-        ],
-        [
-            'type' => 'missing_check_in',
-            'count' => $compositeCounts['incomplete_data'],
-            'route' => '/club/players',
-            'filter' => 'missing_wellness',
-        ],
-        [
-            'type' => 'overdue_tasks',
-            'count' => $overdueTasks,
-            'route' => '/club/tasks',
-        ],
-        [
-            'type' => 'physio_today',
-            'count' => $physioSessionsToday,
-            'route' => '/club/reports',
-        ],
-    ],
     'range'            => ['from' => $rangeFrom, 'to' => $rangeTo],
     'totals'           => [
         'total_minutes' => $totalMinutes,

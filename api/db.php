@@ -315,8 +315,6 @@ function ensureSchema(PDO $pdo): void {
     ensureColumn($pdo, 'player_rpe',          'completed_full_session', 'TINYINT NOT NULL DEFAULT 1');
     ensureColumn($pdo, 'player_rpe',          'actual_duration_minutes', 'SMALLINT NULL');
     ensureColumn($pdo, 'player_rpe',          'incomplete_reason', 'VARCHAR(255) NULL');
-    ensureColumn($pdo, 'player_rpe',          'last_edited_at', 'DATETIME NULL');
-    ensureColumn($pdo, 'player_rpe',          'last_edited_by_user_id', 'INT NULL');
     ensureColumn($pdo, 'player_rpe',          'assessment_id',    'VARCHAR(64) NULL');
     ensureColumn($pdo, 'player_rpe',          'linked_player_id', 'VARCHAR(64) NULL');
     ensureColumn($pdo, 'player_rpe',          'club_id',          'INT NULL');
@@ -449,7 +447,6 @@ function ensureSchema(PDO $pdo): void {
         id VARCHAR(64) PRIMARY KEY,
         user_id INT NOT NULL,
         name VARCHAR(255) NOT NULL,
-        nickname VARCHAR(100) NULL,
         position VARCHAR(50) NULL,
         team_name VARCHAR(100) NULL,
         category VARCHAR(50) NULL,
@@ -469,7 +466,6 @@ function ensureSchema(PDO $pdo): void {
     ensureColumn($pdo, 'club_players', 'linked_user_id', 'INT NULL');
     // ── club_players MVP fields ──────────────────────────────────────────────
     ensureColumn($pdo, 'club_players', 'number',         'VARCHAR(10) NULL');
-    ensureColumn($pdo, 'club_players', 'nickname',       'VARCHAR(100) NULL');
     ensureColumn($pdo, 'club_players', 'date_of_birth',  'DATE NULL');
     ensureColumn($pdo, 'club_players', 'nationality',    'VARCHAR(80) NULL');
     ensureColumn($pdo, 'club_players', 'physical_notes', 'TEXT NULL');
@@ -484,12 +480,6 @@ function ensureSchema(PDO $pdo): void {
     ensureColumn($pdo, 'club_players', 'expected_return_date','DATE NULL');
     ensureColumn($pdo, 'club_players', 'unavailable_reason',  'VARCHAR(255) NULL');
     ensureColumn($pdo, 'club_players', 'last_assessment_at',  'DATETIME NULL');
-    // Manual physical-coach decision used by the management physical report.
-    // Every player is ready by default until the physical coach changes it.
-    ensureColumn($pdo, 'club_players', 'physical_readiness_status',
-        "VARCHAR(20) NOT NULL DEFAULT 'ready'");
-    ensureColumn($pdo, 'club_players', 'physical_readiness_updated_by', 'INT NULL');
-    ensureColumn($pdo, 'club_players', 'physical_readiness_updated_at', 'DATETIME NULL');
 
     // ── one-time migration guard ───────────────────────────────────────────────
     $pdo->exec("CREATE TABLE IF NOT EXISTS system_meta (

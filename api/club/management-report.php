@@ -64,7 +64,6 @@ foreach ($rosterStmt->fetchAll() as $p) {
         'name'       => $p['name'],
         'minutes'    => 0,
         'attendance' => ['present' => 0, 'late' => 0, 'absent' => 0],
-        'sessions'   => ['completed' => 0, 'assigned' => 0],
         'cards'      => ['yellow' => 0, 'red' => 0],
     ];
 }
@@ -98,42 +97,6 @@ foreach ($aStmt->fetchAll() as $row) {
     $status = $row['status'];
     if (isset($players[$pid]) && in_array($status, ['present', 'late', 'absent'], true)) {
         $players[$pid]['attendance'][$status] = (int)$row['cnt'];
-    }
-}
-
-// Sessions: assignment is counted as soon as the player is added. A session
-// is completed for that player only after its coach evaluation is saved.
-$evaluatedBySession = [];
-$eStmt = $pdo->prepare(
-    'SELECT ce.session_id, ce.player_id
-     FROM coach_evaluations ce
-     JOIN club_sessions cs ON cs.id = ce.session_id
-     WHERE ce.club_id = ? AND cs.club_id = ? AND ce.session_id IS NOT NULL
-       AND (cs.status IS NULL OR cs.status <> ?)'
-);
-$eStmt->execute([$cid, $cid, 'cancelled']);
-foreach ($eStmt->fetchAll() as $row) {
-    $evaluatedBySession[(string)$row['session_id']][(string)$row['player_id']] = true;
-}
-
-$sStmt = $pdo->prepare(
-    'SELECT id, player_ids
-     FROM club_sessions
-     WHERE club_id = ? AND (status IS NULL OR status <> ?)'
-);
-$sStmt->execute([$cid, 'cancelled']);
-foreach ($sStmt->fetchAll() as $row) {
-    $assignedIds = $row['player_ids'] && $row['player_ids'] !== 'null'
-        ? json_decode($row['player_ids'], true) ?? [] : [];
-    if (!is_array($assignedIds)) continue;
-
-    $sessionId = (string)$row['id'];
-    foreach (array_unique(array_map('strval', $assignedIds)) as $playerId) {
-        if (!isset($players[$playerId])) continue;
-        $players[$playerId]['sessions']['assigned']++;
-        if (isset($evaluatedBySession[$sessionId][$playerId])) {
-            $players[$playerId]['sessions']['completed']++;
-        }
     }
 }
 

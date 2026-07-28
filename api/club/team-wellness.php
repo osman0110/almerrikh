@@ -120,8 +120,6 @@ foreach ($trainingLoadRoster as $p) {
         'missing_rpe_count'   => $last28['missing_rpe_count'],
         'missing_duration_count' => $last28['missing_duration_count'],
         'data_completeness'   => $last28['data_completeness'],
-        'acute_load_7d'       => $acwr['acute_load_7d'],
-        'chronic_load_weekly_average' => $acwr['chronic_weekly_average'],
         'acwr'                => $acwr['acwr'],
         'acwr_classification' => $acwr['classification'],
         'acwr_details'        => $acwr,

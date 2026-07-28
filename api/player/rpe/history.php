@@ -48,8 +48,7 @@ $activeFilter = SchemaInspector::hasColumn($pdo, 'player_rpe', 'is_active_record
     : '';
 $stmt = $pdo->prepare(
     'SELECT id, session_type, rpe_score, duration_minutes, training_load, notes, submitted_at,
-            completed_full_session, actual_duration_minutes, incomplete_reason,
-            revision_number, last_edited_at
+            completed_full_session, actual_duration_minutes, incomplete_reason
      FROM player_rpe
      WHERE user_id = ?' . $activeFilter . '
      ORDER BY submitted_at DESC LIMIT ?'
@@ -63,9 +62,6 @@ $history = $stmt->fetchAll();
 foreach ($history as &$row) {
     if (isset($row['rpe_score']))     $row['rpe_score']     = (float)$row['rpe_score'];
     if (isset($row['training_load'])) $row['training_load'] = (float)$row['training_load'];
-    $row['record_status'] = (int)($row['revision_number'] ?? 1) > 1
-        ? 'edited'
-        : 'original';
 }
 unset($row);
 
