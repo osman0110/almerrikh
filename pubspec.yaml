@@ -29,7 +29,7 @@ dependencies:
   printing: ^5.13.4
   fl_chart: ^0.69.0
   image_picker: ^1.1.2
-  sentry_flutter: ^8.9.0
+  sentry_flutter: ^9.27.0
   cached_network_image: ^3.3.1
   qr_flutter: ^4.1.0
   excel: ^4.0.6
