@@ -47,29 +47,28 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyAKWOB-89U3PxoQOJ6sNiEom0rKVKo_03E',
-    authDomain: 'nextkick-24911.firebaseapp.com',
-    projectId: 'nextkick-24911',
-    storageBucket: 'nextkick-24911.firebasestorage.app',
-    messagingSenderId: '443776198308',
-    appId: '1:443776198308:web:00000000000000000000',
-    measurementId: 'G-XXXXXXXXXX',
+    apiKey: 'AIzaSyDTh6RZqu6bcml_cBRtUAJJUsIBIWVx0Uk',
+    appId: '1:947466090687:web:c30607069f649da68cee0a',
+    messagingSenderId: '947466090687',
+    projectId: 'al-merrikh',
+    authDomain: 'al-merrikh.firebaseapp.com',
+    storageBucket: 'al-merrikh.firebasestorage.app',
+    measurementId: 'G-2XYDG8PX26',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyAKWOB-89U3PxoQOJ6sNiEom0rKVKo_03E',
-    appId: '1:443776198308:android:e2dbbd4746a7bc68d82831',
-    messagingSenderId: '443776198308',
-    projectId: 'nextkick-24911',
-    storageBucket: 'nextkick-24911.firebasestorage.app',
+    apiKey: 'AIzaSyBU1RaaMTWIap-pS2moYHwaFUnaYttZNmA',
+    appId: '1:947466090687:android:efd24498843f01568cee0a',
+    messagingSenderId: '947466090687',
+    projectId: 'al-merrikh',
+    storageBucket: 'al-merrikh.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCF0tAZx5wwH_tBhvddY2KdrAIL9YT0iHI',
-    appId: '1:443776198308:ios:fea64fcbd576e991d82831',
-    messagingSenderId: '443776198308',
-    projectId: 'nextkick-24911',
-    storageBucket: 'nextkick-24911.firebasestorage.app',
-    iosBundleId: 'com.nextkick.app',
+    apiKey: 'AIzaSyCH7PIgS9rbawwkDnN1Xca8N6Jv_bB-8lw',
+    appId: '1:947466090687:ios:4037bacc450782e58cee0a',
+    messagingSenderId: '947466090687',
+    projectId: 'al-merrikh',
+    storageBucket: 'al-merrikh.firebasestorage.app',
+    iosBundleId: 'com.nextkick.almerrikh',
   );
 }
