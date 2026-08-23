@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:smart_sport_scribe_main/services/exercise_engine.dart';
+import 'package:al_merrikh/services/exercise_engine.dart';
 
 /// Builders for synthetic [PoseSnapshot] sequences used to unit-test the
 /// pose pipeline (smoothing, quality gate, state machine, jump measurement)

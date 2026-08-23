@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_sport_scribe_main/services/jump_state_machine.dart';
-import 'package:smart_sport_scribe_main/services/pose_assessment_config.dart';
+import 'package:al_merrikh/services/jump_state_machine.dart';
+import 'package:al_merrikh/services/pose_assessment_config.dart';
 
 import 'fixtures/synthetic_pose_sequences.dart';
 

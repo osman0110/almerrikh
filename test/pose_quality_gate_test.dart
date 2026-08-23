@@ -1,7 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_sport_scribe_main/services/pose_quality_gate.dart';
+import 'package:al_merrikh/services/pose_quality_gate.dart';
 
 import 'fixtures/synthetic_pose_sequences.dart';
 

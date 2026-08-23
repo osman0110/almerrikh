@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_sport_scribe_main/utils/metric_formatter.dart';
+import 'package:al_merrikh/utils/metric_formatter.dart';
 
 void main() {
   test('uses the approved fitness precision and units', () {

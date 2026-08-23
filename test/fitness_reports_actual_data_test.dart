@@ -4,10 +4,10 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import 'package:smart_sport_scribe_main/models/body_composition_models.dart';
-import 'package:smart_sport_scribe_main/models/monitoring_models.dart';
-import 'package:smart_sport_scribe_main/models/training_load_models.dart';
-import 'package:smart_sport_scribe_main/services/report_service.dart';
+import 'package:al_merrikh/models/body_composition_models.dart';
+import 'package:al_merrikh/models/monitoring_models.dart';
+import 'package:al_merrikh/models/training_load_models.dart';
+import 'package:al_merrikh/services/report_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

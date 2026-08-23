@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_sport_scribe_main/models/assessment_result_model.dart';
-import 'package:smart_sport_scribe_main/services/exercise_engine.dart';
-import 'package:smart_sport_scribe_main/services/jump_analysis_service.dart';
+import 'package:al_merrikh/models/assessment_result_model.dart';
+import 'package:al_merrikh/services/exercise_engine.dart';
+import 'package:al_merrikh/services/jump_analysis_service.dart';
 
 import 'fixtures/synthetic_pose_sequences.dart';
 
