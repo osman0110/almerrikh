@@ -575,11 +575,21 @@ if ($method === 'POST') {
                 ->execute([$id]);
         }
         $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('sessions.php: session_players bridge failed: ' . $e->getMessage());
+        jsonOut(['error' => 'Unable to save the session and player assignments'], 500);
+    }
 
-        // Newly scheduled session — alert the assigned players and the
-        // physical coach. Updates to an existing session stay silent to
-        // avoid re-notifying on every minor edit.
-        if ($isNewSession && $clubId) {
+    // Newly scheduled session — alert the assigned players and the physical
+    // coach. Updates to an existing session stay silent to avoid
+    // re-notifying on every minor edit. Runs AFTER the commit above and in
+    // its own try/catch: the session is already saved at this point, so a
+    // notification failure must never be reported back as a save failure.
+    if ($isNewSession && $clubId) {
+        try {
             $startTime = $body['startTime'] ?? $body['start_time'] ?? '';
             $when = "$date $startTime";
             foreach ($linkedRows ?? [] as $cp) {
@@ -589,13 +599,9 @@ if ($method === 'POST') {
                 );
             }
             notifyClubRole($pdo, (int)$clubId, 'coach', 'session_scheduled_coach', ['title' => $title, 'when' => $when], ['linked_route' => '/session/' . $id]);
+        } catch (Throwable $e) {
+            error_log('sessions.php: session_scheduled notification failed: ' . $e->getMessage());
         }
-    } catch (Throwable $e) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-        error_log('sessions.php: session_players bridge failed: ' . $e->getMessage());
-        jsonOut(['error' => 'Unable to save the session and player assignments'], 500);
     }
 
     jsonOut(['success' => true, 'id' => $id]);

@@ -145,7 +145,7 @@ class _MyMatchesScreenState extends State<MyMatchesScreen> with SingleTickerProv
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: matches.length,
-      itemBuilder: (_, i) => _MatchTile(match: matches[i]),
+      itemBuilder: (_, i) => _MatchTile(match: matches[i], onChanged: _load),
     );
   }
 
@@ -291,8 +291,11 @@ class _PlayerListLoadError extends StatelessWidget {
 }
 
 class _MatchTile extends StatelessWidget {
-  const _MatchTile({required this.match});
+  const _MatchTile({required this.match, required this.onChanged});
   final MatchModel match;
+  // Refreshes the list after returning from the Hooper/RPE submit screens so
+  // a just-submitted entry flips to its "done" state immediately.
+  final Future<void> Function() onChanged;
 
   Color get _statusColor {
     switch (match.status) {
@@ -392,8 +395,9 @@ class _MatchTile extends StatelessWidget {
             score: match.hooperScore,
             actionable: _showHooper,
             isRequired: match.wellnessRequired,
-            onTap: () => Navigator.of(context).pushNamed(
-                '/player/monitoring/hooper?sessionId=${match.id}'),
+            onTap: () => Navigator.of(context)
+                .pushNamed('/player/monitoring/hooper?sessionId=${match.id}')
+                .then((_) => onChanged()),
           ),
           const SizedBox(height: 8),
           WellnessDetailRow(
@@ -403,9 +407,10 @@ class _MatchTile extends StatelessWidget {
             score: match.rpeScore,
             actionable: _showRpe,
             isRequired: match.rpeRequired,
-            onTap: () => Navigator.of(context).pushNamed(
-                '/player/monitoring/rpe?sessionId=${match.id}'
-                '&durationMinutes=${match.myMinutes}'),
+            onTap: () => Navigator.of(context)
+                .pushNamed('/player/monitoring/rpe?sessionId=${match.id}'
+                    '&durationMinutes=${match.myMinutes}')
+                .then((_) => onChanged()),
           ),
         ],
       ),

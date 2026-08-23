@@ -216,13 +216,19 @@ if ($method === 'POST') {
         ]);
         $taskId = (int)$pdo->lastInsertId();
 
+        // The task above is already saved — a notification failure must
+        // never be reported back to the caller as a save failure.
         if ($assignedTo !== (int)$user['id']) {
-            createNotification(
-                $pdo, $ctx['club_id'], $assignedTo,
-                'task_assigned',
-                ['task_title' => $title, 'raw_body' => trim($body['description'] ?? '')],
-                '/club/tasks/' . $taskId
-            );
+            try {
+                createNotification(
+                    $pdo, $ctx['club_id'], $assignedTo,
+                    'task_assigned',
+                    ['task_title' => $title, 'raw_body' => trim($body['description'] ?? '')],
+                    '/club/tasks/' . $taskId
+                );
+            } catch (Throwable $e) {
+                error_log('tasks.php: task_assigned notification failed: ' . $e->getMessage());
+            }
         }
 
         jsonOut(['success' => true, 'id' => (string)$taskId]);
@@ -265,17 +271,23 @@ if ($method === 'POST') {
              VALUES (?, ?, ?, ?)'
         )->execute([$taskId, $user['id'], $comment, trim($body['attachment_url'] ?? '') ?: null]);
 
-        // Notify the other participant (not the commenter).
+        // Notify the other participant (not the commenter). The comment
+        // above is already saved — a notification failure must never be
+        // reported back to the caller as a save failure.
         $notifyUserId = (int)$task['assigned_to_user_id'] === (int)$user['id']
             ? (int)$task['created_by_user_id']
             : (int)$task['assigned_to_user_id'];
         if ($notifyUserId !== (int)$user['id']) {
-            createNotification(
-                $pdo, $ctx['club_id'], $notifyUserId,
-                'task_comment',
-                ['task_title' => $task['title'], 'raw_body' => $comment],
-                '/club/tasks/' . $taskId
-            );
+            try {
+                createNotification(
+                    $pdo, $ctx['club_id'], $notifyUserId,
+                    'task_comment',
+                    ['task_title' => $task['title'], 'raw_body' => $comment],
+                    '/club/tasks/' . $taskId
+                );
+            } catch (Throwable $e) {
+                error_log('tasks.php: task_comment notification failed: ' . $e->getMessage());
+            }
         }
 
         jsonOut(['success' => true]);

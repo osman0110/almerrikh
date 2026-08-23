@@ -475,30 +475,42 @@ if ($method === 'POST') {
         $opponentScore,
     ]);
 
-    disciplineAdvanceForCompletedMatch($pdo, [
-        'id' => $id,
-        'club_id' => $ctx['club_id'],
-        'competition_id' => $competitionId,
-        'match_date' => $date,
-        'status' => $body['status'] ?? 'scheduled',
-    ]);
+    // The match row above is already saved (autocommit, no explicit
+    // transaction). Everything below is best-effort follow-up — discipline
+    // bookkeeping and notifications — and must never turn an already-saved
+    // match into a reported failure, so each runs in its own try/catch.
+    try {
+        disciplineAdvanceForCompletedMatch($pdo, [
+            'id' => $id,
+            'club_id' => $ctx['club_id'],
+            'competition_id' => $competitionId,
+            'match_date' => $date,
+            'status' => $body['status'] ?? 'scheduled',
+        ]);
+    } catch (Throwable $e) {
+        error_log('matches.php: disciplineAdvanceForCompletedMatch failed: ' . $e->getMessage());
+    }
 
     // Newly scheduled match — alert the selected players and the coaching
     // staff. Updates to an existing match stay silent.
     if (!$existing && is_array($playerIds) && $playerIds) {
-        $placeholders = implode(',', array_fill(0, count($playerIds), '?'));
-        $linkedStmt = $pdo->prepare(
-            "SELECT linked_user_id FROM club_players WHERE id IN ($placeholders) AND linked_user_id IS NOT NULL"
-        );
-        $linkedStmt->execute($playerIds);
-        $when = "$date " . ($body['match_time'] ?? $body['time'] ?? '');
-        foreach ($linkedStmt->fetchAll(PDO::FETCH_COLUMN) as $linkedUserId) {
-            createNotification(
-                $pdo, (int)$ctx['club_id'], (int)$linkedUserId, 'match_scheduled',
-                ['opponent' => $opponent, 'when' => $when], '/match/' . $id
+        try {
+            $placeholders = implode(',', array_fill(0, count($playerIds), '?'));
+            $linkedStmt = $pdo->prepare(
+                "SELECT linked_user_id FROM club_players WHERE id IN ($placeholders) AND linked_user_id IS NOT NULL"
             );
+            $linkedStmt->execute($playerIds);
+            $when = "$date " . ($body['match_time'] ?? $body['time'] ?? '');
+            foreach ($linkedStmt->fetchAll(PDO::FETCH_COLUMN) as $linkedUserId) {
+                createNotification(
+                    $pdo, (int)$ctx['club_id'], (int)$linkedUserId, 'match_scheduled',
+                    ['opponent' => $opponent, 'when' => $when], '/match/' . $id
+                );
+            }
+            notifyClubRole($pdo, (int)$ctx['club_id'], 'coach', 'match_scheduled_coach', ['opponent' => $opponent, 'when' => $when], ['linked_route' => '/match/' . $id]);
+        } catch (Throwable $e) {
+            error_log('matches.php: match_scheduled notification failed: ' . $e->getMessage());
         }
-        notifyClubRole($pdo, (int)$ctx['club_id'], 'coach', 'match_scheduled_coach', ['opponent' => $opponent, 'when' => $when], ['linked_route' => '/match/' . $id]);
     }
 
     jsonOut(['success' => true, 'id' => $id]);

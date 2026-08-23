@@ -172,12 +172,18 @@ if ($postRpe >= 8)  $response['coach_alert'] = 'high_rpe';
 if ($painReported)  $response['coach_alert'] = 'pain_reported';
 
 // Alert the physical coach when post-session feedback flags a concern.
+// The feedback/RPE rows above are already saved — a notification failure
+// here must never be reported back to the player as a save failure.
 if (!empty($response['coach_alert']) && $clubId) {
-    notifyClubRole(
-        $pdo, (int)$clubId, 'coach', 'post_session_alert',
-        ['pain_reported' => $painReported, 'rpe' => $postRpe],
-        array_filter(['linked_route' => $sessionId ? '/session/' . $sessionId : null])
-    );
+    try {
+        notifyClubRole(
+            $pdo, (int)$clubId, 'coach', 'post_session_alert',
+            ['pain_reported' => $painReported, 'rpe' => $postRpe],
+            array_filter(['linked_route' => $sessionId ? '/session/' . $sessionId : null])
+        );
+    } catch (Throwable $e) {
+        error_log('post-feedback.php: post_session_alert notification failed: ' . $e->getMessage());
+    }
 }
 
 jsonOut($response);

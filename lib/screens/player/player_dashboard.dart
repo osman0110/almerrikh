@@ -1188,7 +1188,8 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
           icon: Icons.self_improvement_rounded,
           label: AppLocalizations.get('pending_hooper_match'),
           onTap: (context) => Navigator.of(context)
-              .pushNamed('/player/monitoring/hooper?sessionId=${match.id}'),
+              .pushNamed('/player/monitoring/hooper?sessionId=${match.id}')
+              .then((_) => _loadData()),
         ));
       }
       if (match.rpeRequired &&
@@ -1200,8 +1201,10 @@ class _PlayerDashboardPageState extends State<PlayerDashboardPage> {
         items.add(_PendingCheck(
           icon: Icons.speed_rounded,
           label: AppLocalizations.get('pending_rpe_match'),
-          onTap: (context) => Navigator.of(context).pushNamed(
-              '/player/monitoring/rpe?sessionId=${match.id}&durationMinutes=${match.myMinutes}'),
+          onTap: (context) => Navigator.of(context)
+              .pushNamed(
+                  '/player/monitoring/rpe?sessionId=${match.id}&durationMinutes=${match.myMinutes}')
+              .then((_) => _loadData()),
         ));
       }
     }

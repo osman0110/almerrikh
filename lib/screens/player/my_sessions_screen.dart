@@ -203,7 +203,7 @@ class _MySessionsScreenState extends State<MySessionsScreen> with SingleTickerPr
       children: [
         if (sessions.isNotEmpty) ...[
           _SectionTitle(AppLocalizations.get('my_training_sessions_section')),
-          ...sessions.map((s) => _SessionTile(session: s)),
+          ...sessions.map((s) => _SessionTile(session: s, onChanged: _load)),
         ],
         if (medical.isNotEmpty) ...[
           const SizedBox(height: 8),
@@ -257,7 +257,7 @@ class _MySessionsScreenState extends State<MySessionsScreen> with SingleTickerPr
                   children: [
                     if (visibleSessions.isNotEmpty) ...[
                       _SectionTitle(AppLocalizations.get('my_training_sessions_section')),
-                      ...visibleSessions.map((s) => _SessionTile(session: s)),
+                      ...visibleSessions.map((s) => _SessionTile(session: s, onChanged: _load)),
                     ],
                     if (visibleMedical.isNotEmpty) ...[
                       const SizedBox(height: 8),
@@ -380,8 +380,11 @@ class _PlayerListLoadError extends StatelessWidget {
 }
 
 class _SessionTile extends StatelessWidget {
-  const _SessionTile({required this.session});
+  const _SessionTile({required this.session, required this.onChanged});
   final TrainingSession session;
+  // Refreshes the agenda after returning from the Hooper/RPE submit screens
+  // so a just-submitted entry flips to its "done" state immediately.
+  final Future<void> Function() onChanged;
 
   Color get _statusColor {
     switch (session.status) {
@@ -471,8 +474,9 @@ class _SessionTile extends StatelessWidget {
             score: session.hooperScore,
             actionable: _showHooper,
             isRequired: session.wellnessRequired,
-            onTap: () => Navigator.of(context).pushNamed(
-                '/player/monitoring/hooper?sessionId=${session.id}'),
+            onTap: () => Navigator.of(context)
+                .pushNamed('/player/monitoring/hooper?sessionId=${session.id}')
+                .then((_) => onChanged()),
           ),
           const SizedBox(height: 8),
           WellnessDetailRow(
@@ -482,9 +486,10 @@ class _SessionTile extends StatelessWidget {
             score: session.rpeScore,
             actionable: _showRpe,
             isRequired: session.rpeRequired,
-            onTap: () => Navigator.of(context).pushNamed(
-                '/player/monitoring/rpe?sessionId=${session.id}'
-                '&durationMinutes=${session.durationMin}'),
+            onTap: () => Navigator.of(context)
+                .pushNamed('/player/monitoring/rpe?sessionId=${session.id}'
+                    '&durationMinutes=${session.durationMin}')
+                .then((_) => onChanged()),
           ),
         ],
       ),

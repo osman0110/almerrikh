@@ -187,24 +187,30 @@ if ($method === 'POST') {
 
         // Notify doctor + physiotherapist staff (per the injury workflow —
         // they need to pick up diagnosis/treatment from here), excluding
-        // whoever just opened the case.
-        $staffStmt = $pdo->prepare(
-            "SELECT user_id FROM club_staff
-             WHERE club_id = ? AND status = 'active'
-               AND staff_role IN ('doctor', 'physiotherapist', 'massage_specialist')
-               AND user_id != ?"
-        );
-        $staffStmt->execute([$ctx['club_id'], $user['id']]);
-        $playerName = $pdo->prepare('SELECT name FROM club_players WHERE id = ?');
-        $playerName->execute([$playerId]);
-        $pName = $playerName->fetchColumn() ?: '';
-        foreach ($staffStmt->fetchAll(PDO::FETCH_COLUMN) as $staffUserId) {
-            createNotification(
-                $pdo, $ctx['club_id'], (int)$staffUserId,
-                'injury_created',
-                ['player_name' => $pName, 'raw_body' => trim($body['injury_type'] ?? '')],
-                '/club/players/' . $playerId
+        // whoever just opened the case. The injury case above is already
+        // saved, so a notification failure here must never be reported back
+        // as a save failure.
+        try {
+            $staffStmt = $pdo->prepare(
+                "SELECT user_id FROM club_staff
+                 WHERE club_id = ? AND status = 'active'
+                   AND staff_role IN ('doctor', 'physiotherapist', 'massage_specialist')
+                   AND user_id != ?"
             );
+            $staffStmt->execute([$ctx['club_id'], $user['id']]);
+            $playerName = $pdo->prepare('SELECT name FROM club_players WHERE id = ?');
+            $playerName->execute([$playerId]);
+            $pName = $playerName->fetchColumn() ?: '';
+            foreach ($staffStmt->fetchAll(PDO::FETCH_COLUMN) as $staffUserId) {
+                createNotification(
+                    $pdo, $ctx['club_id'], (int)$staffUserId,
+                    'injury_created',
+                    ['player_name' => $pName, 'raw_body' => trim($body['injury_type'] ?? '')],
+                    '/club/players/' . $playerId
+                );
+            }
+        } catch (Throwable $e) {
+            error_log('injuries.php: injury_created notification failed: ' . $e->getMessage());
         }
 
         jsonOut(['success' => true, 'id' => (string)$caseId]);

@@ -88,33 +88,39 @@ function phaseOut(array $p): array {
     ];
 }
 
+// Called after the phase row is already saved — never let a notification
+// failure here surface as a save failure to the caller.
 function notifyPhaseChange(PDO $pdo, int $clubId, string $injuryCaseId, int $phaseNumber, string $notificationType): void {
-    $caseStmt = $pdo->prepare('SELECT player_id FROM injury_cases WHERE id = ?');
-    $caseStmt->execute([$injuryCaseId]);
-    $playerId = $caseStmt->fetchColumn();
-    if (!$playerId) return;
+    try {
+        $caseStmt = $pdo->prepare('SELECT player_id FROM injury_cases WHERE id = ?');
+        $caseStmt->execute([$injuryCaseId]);
+        $playerId = $caseStmt->fetchColumn();
+        if (!$playerId) return;
 
-    $nameStmt = $pdo->prepare('SELECT name FROM club_players WHERE id = ?');
-    $nameStmt->execute([$playerId]);
-    $playerName = $nameStmt->fetchColumn() ?: '';
+        $nameStmt = $pdo->prepare('SELECT name FROM club_players WHERE id = ?');
+        $nameStmt->execute([$playerId]);
+        $playerName = $nameStmt->fetchColumn() ?: '';
 
-    $roles = in_array($phaseNumber, COACH_HANDOFF_PHASES, true)
-        ? ['coach', 'performance_manager']
-        : ['doctor', 'physiotherapist', 'massage_specialist'];
-    $placeholders = implode(',', array_fill(0, count($roles), '?'));
-    $staffStmt = $pdo->prepare(
-        "SELECT user_id FROM club_staff
-         WHERE club_id = ? AND status = 'active' AND staff_role IN ($placeholders)"
-    );
-    $staffStmt->execute(array_merge([$clubId], $roles));
-
-    foreach ($staffStmt->fetchAll(PDO::FETCH_COLUMN) as $staffUserId) {
-        createNotification(
-            $pdo, $clubId, (int)$staffUserId,
-            $notificationType,
-            ['player_name' => $playerName, 'phase_number' => $phaseNumber],
-            '/club/players/' . $playerId
+        $roles = in_array($phaseNumber, COACH_HANDOFF_PHASES, true)
+            ? ['coach', 'performance_manager']
+            : ['doctor', 'physiotherapist', 'massage_specialist'];
+        $placeholders = implode(',', array_fill(0, count($roles), '?'));
+        $staffStmt = $pdo->prepare(
+            "SELECT user_id FROM club_staff
+             WHERE club_id = ? AND status = 'active' AND staff_role IN ($placeholders)"
         );
+        $staffStmt->execute(array_merge([$clubId], $roles));
+
+        foreach ($staffStmt->fetchAll(PDO::FETCH_COLUMN) as $staffUserId) {
+            createNotification(
+                $pdo, $clubId, (int)$staffUserId,
+                $notificationType,
+                ['player_name' => $playerName, 'phase_number' => $phaseNumber],
+                '/club/players/' . $playerId
+            );
+        }
+    } catch (Throwable $e) {
+        error_log('rehab_phases.php: ' . $notificationType . ' notification failed: ' . $e->getMessage());
     }
 }
 

@@ -473,20 +473,27 @@ if ($method === 'POST') {
             throw $e;
         }
 
-        foreach ($selectedPlayers as $index => $player) {
-            if (!empty($player['linked_user_id'])) {
+        // The physio session(s) above are already committed — a notification
+        // failure here must never be reported back to the caller as a save
+        // failure.
+        try {
+            foreach ($selectedPlayers as $index => $player) {
+                if (!empty($player['linked_user_id'])) {
+                    createNotification(
+                        $pdo, (int)$ctx['club_id'], (int)$player['linked_user_id'], 'physio_session_scheduled',
+                        ['reason' => $reason, 'scheduled_at' => $scheduledAt], '/physio-session/' . $createdPlayerRowIds[$index]
+                    );
+                }
+            }
+            if ($therapistId !== (int)$user['id']) {
+                $playerCount = count($selectedPlayers);
                 createNotification(
-                    $pdo, (int)$ctx['club_id'], (int)$player['linked_user_id'], 'physio_session_scheduled',
-                    ['reason' => $reason, 'scheduled_at' => $scheduledAt], '/physio-session/' . $createdPlayerRowIds[$index]
+                    $pdo, (int)$ctx['club_id'], $therapistId, 'physio_session_assigned',
+                    ['player_count' => $playerCount, 'scheduled_at' => $scheduledAt], '/physio-session/' . $createdPlayerRowIds[0]
                 );
             }
-        }
-        if ($therapistId !== (int)$user['id']) {
-            $playerCount = count($selectedPlayers);
-            createNotification(
-                $pdo, (int)$ctx['club_id'], $therapistId, 'physio_session_assigned',
-                ['player_count' => $playerCount, 'scheduled_at' => $scheduledAt], '/physio-session/' . $createdPlayerRowIds[0]
-            );
+        } catch (Throwable $e) {
+            error_log('physio_sessions.php: notification failed: ' . $e->getMessage());
         }
 
         jsonOut([
