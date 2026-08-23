@@ -126,6 +126,26 @@ foreach ($cardStmt->fetchAll() as $r) {
     if ($r['card_type'] === 'red')    $red    = (int)$r['cnt'];
 }
 
+$discipline = [
+    'season_yellow_cards' => $yellow,
+    'current_yellow_cards' => 0,
+    'red_cards' => $red,
+    'suspensions_total' => 0,
+    'active_suspensions' => 0,
+    'executed_suspensions' => 0,
+    'status' => 'available',
+];
+$stmt = $pdo->prepare('SELECT COALESCE(SUM(current_yellow_cards), 0) FROM player_discipline_cycles WHERE club_id = ? AND player_id = ? AND completed_at IS NULL');
+$stmt->execute([$cid, $playerId]);
+$discipline['current_yellow_cards'] = (int)$stmt->fetchColumn();
+$stmt = $pdo->prepare("SELECT COUNT(*) AS total, SUM(status = 'active') AS active, SUM(status = 'completed') AS completed FROM player_suspensions WHERE club_id = ? AND player_id = ?");
+$stmt->execute([$cid, $playerId]);
+$suspensions = $stmt->fetch() ?: [];
+$discipline['suspensions_total'] = (int)($suspensions['total'] ?? 0);
+$discipline['active_suspensions'] = (int)($suspensions['active'] ?? 0);
+$discipline['executed_suspensions'] = (int)($suspensions['completed'] ?? 0);
+$discipline['status'] = $discipline['active_suspensions'] > 0 ? 'suspended' : ($discipline['current_yellow_cards'] > 0 ? 'available_warning' : 'available');
+
 // ── Coach-safe medical/physio summary — counts only, never diagnosis ────────
 $stmt = $pdo->prepare(
     'SELECT COUNT(*) FROM injury_cases WHERE club_id = ? AND player_id = ? AND case_status = "open"'
@@ -134,7 +154,9 @@ $stmt->execute([$cid, $playerId]);
 $openInjuryCases = (int)$stmt->fetchColumn();
 
 $stmt = $pdo->prepare(
-    'SELECT COUNT(*) FROM physio_sessions WHERE club_id = ? AND player_id = ? AND scheduled_at >= ?'
+    'SELECT COUNT(*) FROM physio_session_players sp
+     JOIN physio_sessions s ON s.id = sp.session_id
+     WHERE s.club_id = ? AND sp.player_id = ? AND s.scheduled_at >= ?'
 );
 $stmt->execute([$cid, $playerId, $from30]);
 $physioSessions30d = (int)$stmt->fetchColumn();
@@ -167,6 +189,7 @@ jsonOut([
         'yellow_cards' => $yellow,
         'red_cards'    => $red,
     ],
+    'discipline' => $discipline,
     'assessments' => [
         'latest_score'    => $player['latest_score'] !== null ? (float)$player['latest_score'] : null,
         'movement_score'  => $player['movement_score'] !== null ? (float)$player['movement_score'] : null,

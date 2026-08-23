@@ -13,10 +13,15 @@ final class TrainingLoadWindowService
         PDO $pdo,
         int $userId,
         string $linkedPlayerId,
-        string $endDate
+        string $endDate,
+        ?string $rangeStart = null
     ): array {
         $end = new DateTimeImmutable($endDate, FitnessConfig::timezone());
-        $start = $end->modify('-27 days');
+        $windowStart = $end->modify('-27 days');
+        $requestedStart = $rangeStart !== null
+            ? new DateTimeImmutable($rangeStart, FitnessConfig::timezone())
+            : $windowStart;
+        $start = $requestedStart < $windowStart ? $requestedStart : $windowStart;
         $weeks = [];
         $days = [];
 
@@ -42,6 +47,14 @@ final class TrainingLoadWindowService
             }
         }
 
+        $days28 = array_slice($days, -28);
+        $selectedDays = array_values(array_filter(
+            $days,
+            static fn(array $day): bool => $day['date'] >= $requestedStart->format('Y-m-d')
+                && $day['date'] <= $end->format('Y-m-d')
+        ));
+        // ACWR is always based on the trailing 28-day window. The selected
+        // range is summarized separately and must never change chronic load.
         $dailyRecords = array_map(static function (array $day): array {
             $complete = empty($day['data_quality_issues']);
             return [
@@ -49,10 +62,10 @@ final class TrainingLoadWindowService
                 'load' => $complete ? (float)$day['daily_load'] : null,
                 'complete' => $complete,
             ];
-        }, $days);
+        }, $days28);
         $acwr = AcwrCalculator::calculate($dailyRecords);
 
-        $last7 = array_slice($days, -7);
+        $last7 = array_slice($days28, -7);
         $summarize = static function (array $period): array {
             $sessions = [];
             $missingRpe = 0;
@@ -98,9 +111,13 @@ final class TrainingLoadWindowService
         };
 
         return [
-            'days' => $days,
+            // `days` remains the ACWR/28-day window for existing consumers.
+            'days' => $days28,
+            // The complete requested range is available for custom reports.
+            'days_range' => $selectedDays,
             'last_7_days' => $summarize($last7),
-            'last_28_days' => $summarize($days),
+            'last_28_days' => $summarize($days28),
+            'selected_range' => $summarize($selectedDays),
             'acwr_details' => $acwr,
         ];
     }

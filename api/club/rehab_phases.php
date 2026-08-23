@@ -88,7 +88,7 @@ function phaseOut(array $p): array {
     ];
 }
 
-function notifyPhaseChange(PDO $pdo, int $clubId, string $injuryCaseId, int $phaseNumber, string $eventLabel): void {
+function notifyPhaseChange(PDO $pdo, int $clubId, string $injuryCaseId, int $phaseNumber, string $notificationType): void {
     $caseStmt = $pdo->prepare('SELECT player_id FROM injury_cases WHERE id = ?');
     $caseStmt->execute([$injuryCaseId]);
     $playerId = $caseStmt->fetchColumn();
@@ -111,9 +111,8 @@ function notifyPhaseChange(PDO $pdo, int $clubId, string $injuryCaseId, int $pha
     foreach ($staffStmt->fetchAll(PDO::FETCH_COLUMN) as $staffUserId) {
         createNotification(
             $pdo, $clubId, (int)$staffUserId,
-            'rtp_phase_change',
-            "$eventLabel: $playerName",
-            'المرحلة ' . $phaseNumber . ' — ' . (RTP_PHASES[$phaseNumber] ?? ''),
+            $notificationType,
+            ['player_name' => $playerName, 'phase_number' => $phaseNumber],
             '/club/players/' . $playerId
         );
     }
@@ -211,7 +210,7 @@ if ($method === 'POST') {
              WHERE id = ?"
         )->execute([date('Y-m-d'), $user['id'], $id]);
 
-        notifyPhaseChange($pdo, $ctx['club_id'], $phase['injury_case_id'], (int)$phase['phase_number'], 'مرحلة مكتملة');
+        notifyPhaseChange($pdo, $ctx['club_id'], $phase['injury_case_id'], (int)$phase['phase_number'], 'rtp_phase_completed');
 
         if ($action === 'advance') {
             $nextNumber = (int)$phase['phase_number'] + 1;
@@ -223,7 +222,7 @@ if ($method === 'POST') {
                      ON DUPLICATE KEY UPDATE start_date = start_date'
                 )->execute([$phase['injury_case_id'], $nextNumber, RTP_PHASES[$nextNumber], date('Y-m-d'), $user['id']]);
 
-                notifyPhaseChange($pdo, $ctx['club_id'], $phase['injury_case_id'], $nextNumber, 'مرحلة جديدة بدأت');
+                notifyPhaseChange($pdo, $ctx['club_id'], $phase['injury_case_id'], $nextNumber, 'rtp_phase_started');
             }
         }
 

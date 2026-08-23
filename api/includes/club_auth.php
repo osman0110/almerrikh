@@ -29,19 +29,39 @@ function resolveClubContext(PDO $pdo, array $user): array {
         ];
     }
 
-    $legacy = $pdo->prepare('SELECT club_id FROM users WHERE id = ?');
+    $legacy = $pdo->prepare("SELECT club_id, COALESCE(role, 'club') AS role FROM users WHERE id = ?");
     $legacy->execute([$user['id']]);
-    $clubId = $legacy->fetchColumn();
-    if ($clubId) {
+    $legacyRow = $legacy->fetch() ?: [];
+    $clubId = $legacyRow['club_id'] ?? null;
+    // Only legacy club-owner accounts may use users.club_id as a fallback.
+    // Suspended staff keep that column, so treating every such user as owner
+    // would bypass the active club_staff membership check above.
+    if ($clubId && ($legacyRow['role'] ?? '') === 'club') {
         return ['club_id' => (int)$clubId, 'staff_role' => 'owner', 'team_id' => null];
     }
 
     return ['club_id' => null, 'staff_role' => null, 'team_id' => null];
 }
 
+// Coach-exclusive actions: only the physical coach may perform these, even
+// though owner/admin normally bypass every other check via the '*'
+// wildcard, and performance_manager otherwise has broad write access.
+// FMS assessments and body-composition entries are the physical coach's
+// own measurement tools — deliberately kept out of management's hands.
+const COACH_ONLY_ACTIONS = [
+    'fms.write',
+    'fitness.body_composition.create',
+    'fitness.body_composition.update',
+    'fitness.body_composition.import',
+];
+
 // Capability map. Keep this the single source of truth for what each staff
 // role can do — do not duplicate role checks inline in endpoints.
 function clubStaffCan(string $staffRole, string $action): bool {
+    if (in_array($action, COACH_ONLY_ACTIONS, true)) {
+        return $staffRole === 'coach';
+    }
+
     $capabilities = [
         'owner'   => ['*'],
         'admin'   => ['*'],
@@ -54,12 +74,14 @@ function clubStaffCan(string $staffRole, string $action): bool {
         'coach'   => [
             'players.read', 'players.write',
             'sessions.read', 'sessions.write',
-            'matches.create',
+            'matches.create', 'matches.live',
             'assessments.read', 'assessments.write',
+            'fms.write',
             'notes.read', 'notes.write',
             'medical.read',
             'teams.read',
             'seasons.read', 'competitions.read',
+            'physio_sessions.read',
             'daily_readiness.read', 'daily_readiness.write',
             'tasks.view', 'tasks.manage', 'tasks.assign_others',
             'fitness.body_composition.view',
@@ -73,11 +95,13 @@ function clubStaffCan(string $staffRole, string $action): bool {
             'fitness.rpe.create_for_player',
             'fitness.rpe.update',
             'fitness.rpe.resolve_duplicates',
-            'fitness.data_quality.view',
             'fitness.audit.view',
+            'alerts.send',
         ],
         'doctor'  => [
             'players.read',
+            'sessions.read',
+            'competitions.read',
             'notes.read', 'notes.write',
             'medical.read', 'medical.write',
             'medical_detail.read', 'medical_detail.write',
@@ -98,12 +122,14 @@ function clubStaffCan(string $staffRole, string $action): bool {
             'notes.read',
             'teams.read',
             'seasons.read', 'competitions.read',
+            'daily_readiness.read',
+            'fitness.training_load.view',
             'tasks.view',
         ],
         'performance_manager' => [
             'players.read', 'players.write', 'players.delete',
             'sessions.read', 'sessions.write',
-            'matches.create', 'matches.update', 'matches.delete',
+            'matches.create', 'matches.update', 'matches.delete', 'matches.live',
             'assessments.read', 'assessments.write',
             'notes.read', 'notes.write',
             'medical.read', 'medical.write',
@@ -116,8 +142,8 @@ function clubStaffCan(string $staffRole, string $action): bool {
             'tasks.view', 'tasks.manage', 'tasks.assign_others',
             'fitness.body_composition.view',
             'fitness.training_load.view',
-            'fitness.data_quality.view',
             'fitness.audit.view',
+            'alerts.send',
         ],
         // Physiotherapist covers physiotherapy AND massage — one job at
         // this club, not two. 'massage_specialist' is kept as an alias to
@@ -126,6 +152,8 @@ function clubStaffCan(string $staffRole, string $action): bool {
         // invites only ever create 'physiotherapist' (see staff_screen.dart).
         'physiotherapist' => [
             'players.read',
+            'competitions.read',
+            'sessions.read',
             'notes.read', 'notes.write',
             'medical.read', 'medical.write',
             'medical_detail.read', 'medical_detail.write',
@@ -135,6 +163,8 @@ function clubStaffCan(string $staffRole, string $action): bool {
         ],
         'massage_specialist' => [
             'players.read',
+            'competitions.read',
+            'sessions.read',
             'notes.read', 'notes.write',
             'medical.read', 'medical.write',
             'medical_detail.read', 'medical_detail.write',
@@ -144,6 +174,7 @@ function clubStaffCan(string $staffRole, string $action): bool {
         ],
         'nutritionist' => [
             'players.read',
+            'competitions.read',
             'notes.read', 'notes.write',
             'nutrition.read', 'nutrition.write',
             'daily_readiness.read',
@@ -157,13 +188,15 @@ function clubStaffCan(string $staffRole, string $action): bool {
         'tactical_coach' => [
             'players.read',
             'sessions.read', 'sessions.write',
-            'matches.create', 'matches.update', 'matches.delete',
+            'matches.create', 'matches.update', 'matches.delete', 'matches.live',
             'assessments.read',
             'notes.read',
             'teams.read',
             'seasons.read', 'competitions.read',
+            'daily_readiness.read',
             'tasks.view', 'tasks.manage',
             'fitness.training_load.view',
+            'alerts.send',
         ],
     ];
 

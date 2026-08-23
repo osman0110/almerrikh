@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>NextKick — Al Merrikh SC</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ─── CSS VARIABLES ─────────────────────────────── */
+    :root {
+      --bg:           #F4F4EE;
+      --bg-card:      #FFFFFF;
+      --ink:          #0B0F0A;
+      --ink-soft:     #2A2E27;
+      --muted:        #6F7368;
+      --line:         #E2E2D8;
+      --dark:         #0B0F0A;
+      --on-dark:      #F4F4EE;
+      --on-dark-mute: #9DA29A;
+      --lime:         #D4FF3D;
+      --lime-deep:    #B9E82A;
+      --red:          #FF4D2E;
+      --green:        #2DBF6C;
+      --amber:        #F2B23B;
+      --purple:       #8B5CF6;
+      --blue:         #3B82F6;
+      --radius:       14px;
+      --radius-sm:    8px;
+      --radius-lg:    22px;
+    }
+
+    /* ─── RESET ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      direction: rtl;
+      min-height: 100vh;
+      max-width: 430px;
+      margin: 0 auto;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* ─── 1. LIME BAR ───────────────────────────────── */
+    .lime-bar {
+      height: 3px;
+      background: var(--lime);
+      width: 100%;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 200;
+    }
+
+    /* ─── SCROLL WRAPPER ────────────────────────────── */
+    .app-scroll {
+      padding-top: 3px;
+      padding-bottom: 84px;
+      overflow-y: auto;
+      height: 100vh;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .content-area {
+      padding: 0 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding-bottom: 8px;
+    }
+
+    /* ─── 2. HEADER ─────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 14px 11px;
+      background: var(--bg);
+      position: sticky;
+      top: 3px;
+      z-index: 100;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px;
+      border: 2.5px solid var(--ink);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--dark);
+      flex-shrink: 0;
+    }
+
+    .logo span {
+      font-family: 'Archivo', sans-serif;
+      font-weight: 900;
+      font-size: 13px;
+      color: var(--lime);
+      letter-spacing: -0.02em;
+    }
+
+    .header-club { display: flex; flex-direction: column; gap: 2px; }
+
+    .club-name {
+      font-family: 'Archivo', sans-serif;
+      font-weight: 900;
+      font-size: 17px;
+      color: var(--ink);
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+
+    .header-date {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+      font-size: 9.5px;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 7px; }
+
+    .coach-pill {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 600;
+      font-size: 11.5px;
+      color: var(--ink-soft);
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 5px 11px;
+      white-space: nowrap;
+    }
+
+    .bell-btn {
+      position: relative;
+      width: 36px;
+      height: 36px;
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .bell-btn svg { width: 16px; height: 16px; stroke: var(--ink-soft); }
+
+    .bell-dot {
+      position: absolute;
+      top: 5px;
+      left: 6px;
+      width: 7px;
+      height: 7px;
+      background: var(--red);
+      border-radius: 50%;
+      border: 1.5px solid var(--bg-card);
+    }
+
+    /* ─── EYEBROW TAG ───────────────────────────────── */
+    .eyebrow-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+    }
+
+    .eyebrow-tag.dark-tag { border-color: rgba(212,255,61,.25); }
+
+    .eyebrow-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--lime);
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .eyebrow-dot.pulse { animation: pulse-dot 2s ease-in-out infinite; }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(212,255,61,.5); }
+      50% { opacity: .7; transform: scale(0.75); box-shadow: 0 0 0 4px rgba(212,255,61,0); }
+    }
+
+    .eyebrow-text {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 600;
+      font-size: 11px;
+      color: var(--on-dark);
+    }
+
+    .eyebrow-text.ink { color: var(--ink-soft); }
+
+    .eyebrow-mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 9.5px;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* ─── SECTION HEADER ────────────────────────────── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .view-all {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--muted);
+      text-decoration: none;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 1px;
+    }
+
+    /* ─── 3. SESSION CARD ───────────────────────────── */
+    .session-card {
+      background: var(--dark);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+    }
+
+    .session-eyebrow { margin-bottom: 14px; }
+
+    .session-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .session-time {
+      font-family: 'Archivo', sans-serif;
+      font-weight: 900;
+      font-size: 54px;
+      color: var(--lime);
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+
+    .session-info {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      padding-top: 6px;
+      max-width: 160px;
+    }
+
+    .session-name {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--on-dark);
+      line-height: 1.2;
+    }
+
+    .session-location {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--on-dark-mute);
+    }
+
+    .session-location svg { width: 11px; height: 11px; flex-shrink: 0; }
+
+    .session-location span {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 400;
+      font-size: 11px;
+      color: var(--on-dark-mute);
+    }
+
+    .session-divider {
+      height: 1px;
+      background: rgba(255,255,255,.08);
+      margin: 14px 0;
+    }
+
+    .session-meta { display: flex; gap: 10px; margin-bottom: 16px; }
+
+    .meta-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 11px;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: var(--radius-sm);
+      padding: 4px 10px;
+      color: var(--on-dark);
+      letter-spacing: 0.04em;
+    }
+
+    .btn-start {
+      width: 100%;
+      background: var(--lime);
+      color: var(--ink);
+      border: none;
+      border-radius: 999px;
+      padding: 14px;
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    .btn-start:active { background: var(--lime-deep); transform: scale(0.98); }
+
+    .btn-start .play-icon {
+      width: 18px;
+      height: 18px;
+      background: rgba(0,0,0,.15);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      padding-right: 1px;
+    }
+
+    /* ─── 4. TEAM READINESS ─────────────────────────── */
+    .section-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+
+    .readiness-pct-row {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .readiness-pct {
+      font-family: 'Archivo', sans-serif;
+      font-weight: 900;
+      font-size: 48px;
+      color: var(--ink);
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+
+    .readiness-label {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .track-bar {
+      display: flex;
+      height: 8px;
+      border-radius: 99px;
+      overflow: hidden;
+      gap: 2px;
+      margin-bottom: 14px;
+    }
+
+    .track-seg { border-radius: 99px; height: 100%; }
+
+    .readiness-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 7px;
+    }
+
+    .readiness-mini {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 9px 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .mini-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+    .mini-num {
+      font-family: 'Archivo', sans-serif;
+      font-weight: 900;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+
+    .mini-label {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 500;
+      font-size: 10px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    /* ─── 5. COACH ALERTS ───────────────────────────── */
+    .alerts-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .alert-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      border-right-width: 3px;
+      padding: 12px 14px;
+    }
+
+    .alert-row-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .alert-left { display: flex; align-items: center; gap: 7px; }
+
+    .priority-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      border-radius: 999px;
+      padding: 2px 8px;
+      border: 1px solid;
+    }
+
+    .p1 { color: var(--red);    border-color: var(--red);    background: rgba(255,77,46,.08); }
+    .p2 { color: var(--amber);  border-color: var(--amber);  background: rgba(242,178,59,.08); }
+    .p3 { color: var(--blue);   border-color: var(--blue);   background: rgba(59,130,246,.08); }
+
+    .alert-icon { font-size: 15px; line-height: 1; }
+
+    .alert-time {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    .alert-title {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin-bottom: 3px;
+    }
+
+    .alert-desc {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 400;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    /* ─── 6. PLAYER STATUS LIST ─────────────────────── */
+    .players-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .player-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 11px 13px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .player-num {
+      width: 38px;
+      height: 38px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .player-num span {
+      font-family: 'Archivo', sans-serif;
+      font-weight: 900;
+      font-size: 17px;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+
+    .num-green  { background: rgba(45,191,108,.12);  color: var(--green); }
+    .num-amber  { background: rgba(242,178,59,.12);  color: var(--amber); }
+    .num-red    { background: rgba(255,77,46,.12);   color: var(--red); }
+    .num-purple { background: rgba(139,92,246,.12);  color: var(--purple); }
+
+    .player-info { flex: 1; min-width: 0; }
+
+    .player-name-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .player-name {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+    .player-pos {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .player-load-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .load-pct {
+      font-family: 'Archivo', sans-serif;
+      font-weight: 900;
+      font-size: 15px;
+      letter-spacing: -0.03em;
+      min-width: 36px;
+      line-height: 1;
+    }
+
+    .load-bar-wrap {
+      flex: 1;
+      height: 5px;
+      background: var(--bg);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .load-bar-fill { height: 100%; border-radius: 99px; }
+
+    .load-tag {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 400;
+      font-size: 10px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    /* ─── 7. QUICK ACTIONS ──────────────────────────── */
+    .featured-card {
+      background: var(--dark);
+      border: 1px solid rgba(212,255,61,.18);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: border-color .2s;
+    }
+
+    .featured-card:active { border-color: rgba(212,255,61,.45); }
+
+    .featured-right { display: flex; flex-direction: column; gap: 5px; }
+
+    .featured-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 10px;
+      color: var(--lime);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .featured-title {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--on-dark);
+      line-height: 1.18;
+    }
+
+    .featured-sub {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 400;
+      font-size: 12px;
+      color: var(--on-dark-mute);
+    }
+
+    .featured-left { display: flex; align-items: center; gap: 10px; }
+
+    .featured-arrow {
+      font-size: 20px;
+      color: var(--on-dark-mute);
+      line-height: 1;
+    }
+
+    .featured-icon-box {
+      width: 46px;
+      height: 46px;
+      background: var(--lime);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      color: var(--ink);
+    }
+
+    .actions-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .action-mini {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 9px;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+
+    .action-mini:active { border-color: var(--lime); }
+
+    .action-icon-box {
+      width: 38px;
+      height: 38px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 19px;
+    }
+
+    .action-label {
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
+      font-weight: 700;
+      font-size: 11px;
+      color: var(--ink-soft);
+      text-align: center;
+    }
+
+    /* ─── 8. BOTTOM NAVIGATION ──────────────────────── */
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 430px;
+      background: var(--bg-card);
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      padding: 10px 12px 18px;
+      z-index: 100;
+      direction: rtl;
+    }
+
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      cursor: pointer;
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      transition: background .15s;
+      min-width: 48px;
+    }
+
+    .nav-item.active {
+      background: var(--lime);
+      padding: 7px 14px;
+    }
+
+    .nav-icon {
+      font-size: 19px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .nav-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .nav-item.active .nav-label {
+      color: var(--ink);
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ① LIME BAR -->
+<div class="lime-bar"></div>
+
+<div class="app-scroll">
+
+  <!-- ② HEADER -->
+  <header class="header">
+    <div class="header-right">
+      <div class="logo"><span>AM</span></div>
+      <div class="header-club">
+        <div class="club-name">Al Merrikh</div>
+        <div class="header-date">THU · 15 MAY 2026</div>
+      </div>
+    </div>
+    <div class="header-left">
+      <div class="coach-pill">المدرب: أحمد خيري</div>
+      <button class="bell-btn" aria-label="تنبيهات">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <div class="bell-dot"></div>
+      </button>
+    </div>
+  </header>
+
+  <div class="content-area">
+
+    <!-- ③ SESSION CARD -->
+    <div class="session-card">
+      <div class="session-eyebrow">
+        <div class="eyebrow-tag dark-tag">
+          <div class="eyebrow-dot pulse"></div>
+          <span class="eyebrow-text">جلسة اليوم</span>
+        </div>
+      </div>
+
+      <div class="session-top">
+        <div class="session-time">07:30</div>
+        <div class="session-info">
+          <div class="session-name">تدريب القوة والتكتيك</div>
+          <div class="session-location">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+              <circle cx="12" cy="10" r="3"/>
+            </svg>
+            <span>ملعب المريخ الرئيسي</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="session-divider"></div>
+
+      <div class="session-meta">
+        <span class="meta-badge">MIN 90</span>
+        <span class="meta-badge">18 لاعبون</span>
+      </div>
+
+      <button class="btn-start">
+        <span class="play-icon">▶</span>
+        ابدأ الجلسة
+      </button>
+    </div>
+
+    <!-- ④ TEAM READINESS -->
+    <div>
+      <div class="section-header">
+        <div class="eyebrow-tag">
+          <div class="eyebrow-dot"></div>
+          <span class="eyebrow-text ink">جاهزية الفريق</span>
+        </div>
+        <span class="eyebrow-mono">SQUAD / 22</span>
+      </div>
+
+      <div class="section-card">
+        <div class="readiness-pct-row">
+          <span class="readiness-pct">78</span>
+          <span class="readiness-label">% جاهز</span>
+        </div>
+
+        <!-- track bar: green 64% / amber 18% / red 14% / purple 4% -->
+        <div class="track-bar">
+          <div class="track-seg" style="width:63.6%; background:var(--green)"></div>
+          <div class="track-seg" style="width:18.2%; background:var(--amber)"></div>
+          <div class="track-seg" style="width:13.6%; background:var(--red)"></div>
+          <div class="track-seg" style="width:4.6%;  background:var(--purple)"></div>
+        </div>
+
+        <div class="readiness-grid">
+          <div class="readiness-mini">
+            <div class="mini-dot" style="background:var(--green)"></div>
+            <div class="mini-num" style="color:var(--green)">14</div>
+            <div class="mini-label">جاهز</div>
+          </div>
+          <div class="readiness-mini">
+            <div class="mini-dot" style="background:var(--amber)"></div>
+            <div class="mini-num" style="color:var(--amber)">4</div>
+            <div class="mini-label">متعب</div>
+          </div>
+          <div class="readiness-mini">
+            <div class="mini-dot" style="background:var(--red)"></div>
+            <div class="mini-num" style="color:var(--red)">3</div>
+            <div class="mini-label">مصاب</div>
+          </div>
+          <div class="readiness-mini">
+            <div class="mini-dot" style="background:var(--purple)"></div>
+            <div class="mini-num" style="color:var(--purple)">1</div>
+            <div class="mini-label">خطر عالٍ</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑤ COACH ALERTS -->
+    <div>
+      <div class="section-header">
+        <div class="eyebrow-tag">
+          <div class="eyebrow-dot" style="background:var(--red)"></div>
+          <span class="eyebrow-text ink">تنبيهات الكوتش</span>
+        </div>
+        <span class="eyebrow-mono">ACTIVE 3</span>
+      </div>
+
+      <div class="alerts-list">
+
+        <div class="alert-card" style="border-right-color:var(--red); background:rgba(255,77,46,.03)">
+          <div class="alert-row-top">
+            <div class="alert-left">
+              <span class="priority-badge p1">P1</span>
+              <span class="alert-icon">🩺</span>
+            </div>
+            <span class="alert-time">منذ 12 د</span>
+          </div>
+          <div class="alert-title">إصابة عضلية — يوسف الأمين</div>
+          <div class="alert-desc">ألم في الفخذ الأيمن بعد تدريب الأمس، يحتاج تقييماً فورياً</div>
+        </div>
+
+        <div class="alert-card" style="border-right-color:var(--amber); background:rgba(242,178,59,.03)">
+          <div class="alert-row-top">
+            <div class="alert-left">
+              <span class="priority-badge p2">P2</span>
+              <span class="alert-icon">⚡</span>
+            </div>
+            <span class="alert-time">منذ 28 د</span>
+          </div>
+          <div class="alert-title">حمل تدريبي مرتفع — 3 لاعبين</div>
+          <div class="alert-desc">تجاوز عتبة الحمل 85%، يُنصح بتخفيف الشدة خلال جلسة اليوم</div>
+        </div>
+
+        <div class="alert-card" style="border-right-color:var(--blue); background:rgba(59,130,246,.03)">
+          <div class="alert-row-top">
+            <div class="alert-left">
+              <span class="priority-badge p3">P3</span>
+              <span class="alert-icon">📋</span>
+            </div>
+            <span class="alert-time">منذ 45 د</span>
+          </div>
+          <div class="alert-title">موعد تقييم AI — الدفاعيون</div>
+          <div class="alert-desc">جدول اختبار القفز والتوازن لمجموعة الدفاع — اليوم الساعة 10:00 ص</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ⑥ PLAYER STATUS LIST — مرتب: أعلى حملاً أولاً -->
+    <div>
+      <div class="section-header">
+        <div class="eyebrow-tag">
+          <div class="eyebrow-dot"></div>
+          <span class="eyebrow-text ink">حالة اللاعبين</span>
+        </div>
+        <a href="#" class="view-all">عرض الكل</a>
+      </div>
+
+      <div class="players-list">
+
+        <!-- 92% — purple ≥85% -->
+        <div class="player-card">
+          <div class="player-num num-purple"><span>7</span></div>
+          <div class="player-info">
+            <div class="player-name-row">
+              <span class="player-name">عمر حسن</span>
+              <span class="status-dot" style="background:var(--purple)"></span>
+              <span class="player-pos">MF</span>
+            </div>
+            <div class="player-load-row">
+              <span class="load-pct" style="color:var(--purple)">92%</span>
+              <div class="load-bar-wrap">
+                <div class="load-bar-fill" style="width:92%; background:var(--purple)"></div>
+              </div>
+              <span class="load-tag">حمل التدريب</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 87% — purple ≥85% -->
+        <div class="player-card">
+          <div class="player-num num-purple"><span>14</span></div>
+          <div class="player-info">
+            <div class="player-name-row">
+              <span class="player-name">طارق النور</span>
+              <span class="status-dot" style="background:var(--purple)"></span>
+              <span class="player-pos">FW</span>
+            </div>
+            <div class="player-load-row">
+              <span class="load-pct" style="color:var(--purple)">87%</span>
+              <div class="load-bar-wrap">
+                <div class="load-bar-fill" style="width:87%; background:var(--purple)"></div>
+              </div>
+              <span class="load-tag">حمل التدريب</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 78% — red ≥70% -->
+        <div class="player-card">
+          <div class="player-num num-red"><span>11</span></div>
+          <div class="player-info">
+            <div class="player-name-row">
+              <span class="player-name">يوسف الأمين</span>
+              <span class="status-dot" style="background:var(--red)"></span>
+              <span class="player-pos">FW</span>
+            </div>
+            <div class="player-load-row">
+              <span class="load-pct" style="color:var(--red)">78%</span>
+              <div class="load-bar-wrap">
+                <div class="load-bar-fill" style="width:78%; background:var(--red)"></div>
+              </div>
+              <span class="load-tag">حمل التدريب</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 65% — amber ≥60% -->
+        <div class="player-card">
+          <div class="player-num num-amber"><span>5</span></div>
+          <div class="player-info">
+            <div class="player-name-row">
+              <span class="player-name">كمال إبراهيم</span>
+              <span class="status-dot" style="background:var(--amber)"></span>
+              <span class="player-pos">CB</span>
+            </div>
+            <div class="player-load-row">
+              <span class="load-pct" style="color:var(--amber)">65%</span>
+              <div class="load-bar-wrap">
+                <div class="load-bar-fill" style="width:65%; background:var(--amber)"></div>
+              </div>
+              <span class="load-tag">حمل التدريب</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 42% — green <60% -->
+        <div class="player-card">
+          <div class="player-num num-green"><span>1</span></div>
+          <div class="player-info">
+            <div class="player-name-row">
+              <span class="player-name">محمد عبدالله</span>
+              <span class="status-dot" style="background:var(--green)"></span>
+              <span class="player-pos">GK</span>
+            </div>
+            <div class="player-load-row">
+              <span class="load-pct" style="color:var(--green)">42%</span>
+              <div class="load-bar-wrap">
+                <div class="load-bar-fill" style="width:42%; background:var(--green)"></div>
+              </div>
+              <span class="load-tag">حمل التدريب</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ⑦ QUICK ACTIONS -->
+    <div>
+      <div class="section-header">
+        <div class="eyebrow-tag">
+          <div class="eyebrow-dot"></div>
+          <span class="eyebrow-text ink">إجراءات سريعة</span>
+        </div>
+      </div>
+
+      <!-- Featured -->
+      <div class="featured-card">
+        <div class="featured-right">
+          <span class="featured-tag">FEATURED</span>
+          <div class="featured-title">اختبار AI<br>للحركة</div>
+          <div class="featured-sub">تقييم فوري بالكاميرا</div>
+        </div>
+        <div class="featured-left">
+          <span class="featured-arrow">←</span>
+          <div class="featured-icon-box">✦</div>
+        </div>
+      </div>
+
+      <!-- 3 mini cards -->
+      <div class="actions-grid">
+        <div class="action-mini">
+          <div class="action-icon-box" style="background:rgba(45,191,108,.12)">📊</div>
+          <span class="action-label">التقارير</span>
+        </div>
+        <div class="action-mini">
+          <div class="action-icon-box" style="background:rgba(242,178,59,.12)">📅</div>
+          <span class="action-label">الجلسات</span>
+        </div>
+        <div class="action-mini">
+          <div class="action-icon-box" style="background:rgba(139,92,246,.12)">👥</div>
+          <span class="action-label">اللاعبون</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content-area -->
+</div><!-- /app-scroll -->
+
+<!-- ⑧ BOTTOM NAVIGATION — RTL: الرئيسية | لاعبون | جلسات | تقارير | إعدادات -->
+<nav class="bottom-nav">
+  <div class="nav-item active">
+    <span class="nav-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+    </span>
+    <span class="nav-label">الرئيسية</span>
+  </div>
+  <div class="nav-item">
+    <span class="nav-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    </span>
+    <span class="nav-label">لاعبون</span>
+  </div>
+  <div class="nav-item">
+    <span class="nav-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    </span>
+    <span class="nav-label">جلسات</span>
+  </div>
+  <div class="nav-item">
+    <span class="nav-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+    </span>
+    <span class="nav-label">تقارير</span>
+  </div>
+  <div class="nav-item">
+    <span class="nav-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+    </span>
+    <span class="nav-label">إعدادات</span>
+  </div>
+</nav>
+
+</body>
+</html>

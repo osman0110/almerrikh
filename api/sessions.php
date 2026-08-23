@@ -7,6 +7,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once 'db.php';
 require_once 'includes/club_auth.php';
+require_once 'includes/notifications.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -50,10 +51,19 @@ $user   = getAuthUser($pdo);
 // ── GET: list or single session ───────────────────────────────────────────────
 if ($method === 'GET') {
     $singleId = $_GET['id'] ?? null;
+    $ctx = requireClubPermission($pdo, $user, 'sessions.read');
 
     if ($singleId) {
-        $stmt = $pdo->prepare('SELECT * FROM club_sessions WHERE id = ? AND user_id = ?');
-        $stmt->execute([$singleId, $user['id']]);
+        $stmt = $pdo->prepare(
+            'SELECT cs.*,
+                    CASE WHEN cs.actual_started_at IS NULL THEN 0
+                         ELSE TIMESTAMPDIFF(SECOND, cs.actual_started_at,
+                              COALESCE(cs.actual_ended_at, UTC_TIMESTAMP())) END AS elapsed_seconds,
+                    (cs.actual_started_at IS NOT NULL AND cs.actual_ended_at IS NULL
+                     AND cs.status = "active") AS clock_running
+             FROM club_sessions cs WHERE cs.id = ? AND cs.club_id = ?'
+        );
+        $stmt->execute([$singleId, $ctx['club_id']]);
         $row = $stmt->fetch();
         if (!$row) jsonOut(['error' => 'Session not found'], 404);
         normalizeSession($row);
@@ -68,18 +78,21 @@ if ($method === 'GET') {
                 $pStmt = $pdo->prepare(
                     "SELECT id, name, position, number, linked_user_id, status AS player_status
                      FROM club_players
-                     WHERE id IN ($placeholders) AND user_id = ?"
+                     WHERE id IN ($placeholders) AND club_id = ?"
                 );
-                $pStmt->execute([...$playerIds, $user['id']]);
+                $pStmt->execute([...$playerIds, $ctx['club_id']]);
                 $players = $pStmt->fetchAll(PDO::FETCH_ASSOC);
 
                 $aStmt = $pdo->prepare(
-                    'SELECT player_id, status FROM session_attendance WHERE session_id = ? AND user_id = ?'
+                    'SELECT player_id, status, timer_started_at IS NOT NULL AS clock_running,
+                            elapsed_seconds + CASE WHEN timer_started_at IS NULL THEN 0
+                                ELSE TIMESTAMPDIFF(SECOND, timer_started_at, UTC_TIMESTAMP()) END AS elapsed_seconds
+                     FROM session_attendance WHERE session_id = ? AND club_id = ?'
                 );
-                $aStmt->execute([$singleId, $user['id']]);
+                $aStmt->execute([$singleId, $ctx['club_id']]);
                 $attendanceByPlayer = [];
                 foreach ($aStmt->fetchAll(PDO::FETCH_ASSOC) as $a) {
-                    $attendanceByPlayer[$a['player_id']] = $a['status'];
+                    $attendanceByPlayer[$a['player_id']] = $a;
                 }
 
                 foreach ($players as $p) {
@@ -109,7 +122,9 @@ if ($method === 'GET') {
                         'number'            => (int)($p['number'] ?? 0),
                         'name'              => $p['name'],
                         'position'          => $p['position'] ?? '',
-                        'attendance_status' => $attendanceByPlayer[$p['id']] ?? 'pending',
+                        'attendance_status' => $attendanceByPlayer[$p['id']]['status'] ?? 'pending',
+                        'clock_running'      => (bool)($attendanceByPlayer[$p['id']]['clock_running'] ?? false),
+                        'elapsed_seconds'    => max(0, (int)($attendanceByPlayer[$p['id']]['elapsed_seconds'] ?? 0)),
                         'player_status'     => $wellnessLabel,
                         'hooper_score'      => $hooperScore,
                     ];
@@ -126,13 +141,19 @@ if ($method === 'GET') {
     $status = $_GET['status'] ?? null;
     $limit  = min((int)($_GET['limit'] ?? 50), 200);
 
-    $where = ['user_id = ?'];
-    $params = [$user['id']];
+    $where = ['club_id = ?'];
+    $params = [$ctx['club_id']];
 
     if ($date)   { $where[] = 'date = ?';   $params[] = $date; }
     if ($status) { $where[] = 'status = ?'; $params[] = $status; }
 
-    $sql = 'SELECT * FROM club_sessions WHERE ' . implode(' AND ', $where)
+    $sql = 'SELECT club_sessions.*,
+                   CASE WHEN actual_started_at IS NULL THEN 0
+                        ELSE TIMESTAMPDIFF(SECOND, actual_started_at,
+                             COALESCE(actual_ended_at, UTC_TIMESTAMP())) END AS elapsed_seconds,
+                   (actual_started_at IS NOT NULL AND actual_ended_at IS NULL
+                    AND status = "active") AS clock_running
+            FROM club_sessions WHERE ' . implode(' AND ', $where)
          . ' ORDER BY date DESC, start_time ASC LIMIT ' . $limit;
 
     $stmt = $pdo->prepare($sql);
@@ -153,6 +174,8 @@ function normalizeSession(array &$r): void {
     $r['attendance_required'] = (bool)$r['attendance_required'];
     $r['rpe_required']        = (bool)$r['rpe_required'];
     $r['wellness_required']   = (bool)$r['wellness_required'];
+    $r['clock_running']       = (bool)($r['clock_running'] ?? false);
+    $r['elapsed_seconds']     = max(0, (int)($r['elapsed_seconds'] ?? 0));
     // Decode JSON arrays
     $r['player_ids']           = $r['player_ids'] && $r['player_ids'] !== 'null'
         ? json_decode($r['player_ids'], true) ?? [] : [];
@@ -168,6 +191,120 @@ if ($method === 'POST') {
     $body   = json_decode(file_get_contents('php://input'), true) ?? [];
     $action = trim($body['action'] ?? '');
 
+    if ($action === 'session_clock') {
+        $ctx = requireClubPermission($pdo, $user, 'sessions.write');
+        $sessionId = trim($body['session_id'] ?? '');
+        $operation = trim($body['operation'] ?? '');
+        $playerId = trim($body['player_id'] ?? '');
+        if (!$sessionId) jsonOut(['error' => 'session_id required'], 400);
+
+        $sessionStmt = $pdo->prepare('SELECT * FROM club_sessions WHERE id = ? AND club_id = ?');
+        $sessionStmt->execute([$sessionId, $ctx['club_id']]);
+        $session = $sessionStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$session) jsonOut(['error' => 'Session not found'], 404);
+
+        $playerIds = $session['player_ids'] && $session['player_ids'] !== 'null'
+            ? json_decode($session['player_ids'], true) ?? [] : [];
+        $playerIds = array_map('strval', $playerIds);
+        if ($playerId !== '' && !in_array($playerId, $playerIds, true)) {
+            jsonOut(['error' => 'Player is not assigned to this session'], 422);
+        }
+
+        $ensureTimer = $pdo->prepare(
+            "INSERT INTO session_attendance
+                 (session_id, player_id, user_id, club_id, status, marked_at, elapsed_seconds)
+             VALUES (?, ?, ?, ?, 'pending', NULL, 0)
+             ON DUPLICATE KEY UPDATE club_id = VALUES(club_id)"
+        );
+
+        $pdo->beginTransaction();
+        try {
+            if ($operation === 'start_session') {
+                foreach ($playerIds as $assignedId) {
+                    $ensureTimer->execute([$sessionId, $assignedId, (int)$user['id'], $ctx['club_id']]);
+                }
+                $pdo->prepare(
+                    "UPDATE club_sessions SET actual_started_at = COALESCE(actual_started_at, UTC_TIMESTAMP()),
+                     actual_ended_at = NULL, status = 'active' WHERE id = ?"
+                )->execute([$sessionId]);
+                $pdo->prepare(
+                    "UPDATE session_attendance SET timer_started_at = COALESCE(timer_started_at, UTC_TIMESTAMP()),
+                     timer_ended_at = NULL WHERE session_id = ? AND status <> 'absent'"
+                )->execute([$sessionId]);
+                if (!empty($session['linked_training_session_id'])) {
+                    $pdo->prepare(
+                        "UPDATE session_players SET started_at = COALESCE(started_at, UTC_TIMESTAMP()),
+                         completed_at = NULL, status = 'started'
+                         WHERE session_id = ? AND status IN ('assigned', 'pre_checked', 'started')"
+                    )->execute([$session['linked_training_session_id']]);
+                }
+            } elseif ($operation === 'finish_session') {
+                $pdo->prepare(
+                    'UPDATE session_attendance
+                     SET elapsed_seconds = elapsed_seconds + CASE WHEN timer_started_at IS NULL THEN 0
+                             ELSE GREATEST(0, TIMESTAMPDIFF(SECOND, timer_started_at, UTC_TIMESTAMP())) END,
+                         timer_ended_at = CASE WHEN timer_started_at IS NULL THEN timer_ended_at ELSE UTC_TIMESTAMP() END,
+                         timer_started_at = NULL WHERE session_id = ?'
+                )->execute([$sessionId]);
+                $pdo->prepare(
+                    "UPDATE club_sessions SET actual_ended_at = UTC_TIMESTAMP(), status = 'completed' WHERE id = ?"
+                )->execute([$sessionId]);
+                if (!empty($session['linked_training_session_id'])) {
+                    $pdo->prepare(
+                        "UPDATE session_players SET completed_at = COALESCE(completed_at, UTC_TIMESTAMP()), status = 'completed'
+                         WHERE session_id = ? AND started_at IS NOT NULL AND status <> 'missed'"
+                    )->execute([$session['linked_training_session_id']]);
+                }
+            } elseif (in_array($operation, ['start_player', 'stop_player'], true)) {
+                if (!$playerId) {
+                    $pdo->rollBack();
+                    jsonOut(['error' => 'player_id required'], 400);
+                }
+                $ensureTimer->execute([$sessionId, $playerId, (int)$user['id'], $ctx['club_id']]);
+                if ($operation === 'start_player') {
+                    $pdo->prepare(
+                        "UPDATE club_sessions SET actual_started_at = COALESCE(actual_started_at, UTC_TIMESTAMP()),
+                         actual_ended_at = NULL, status = 'active' WHERE id = ?"
+                    )->execute([$sessionId]);
+                    $pdo->prepare(
+                        'UPDATE session_attendance SET timer_started_at = COALESCE(timer_started_at, UTC_TIMESTAMP()),
+                         timer_ended_at = NULL WHERE session_id = ? AND player_id = ?'
+                    )->execute([$sessionId, $playerId]);
+                    if (!empty($session['linked_training_session_id'])) {
+                        $pdo->prepare(
+                            "UPDATE session_players SET started_at = COALESCE(started_at, UTC_TIMESTAMP()),
+                             completed_at = NULL, status = 'started'
+                             WHERE session_id = ? AND linked_player_id = ?
+                                   AND status IN ('assigned', 'pre_checked', 'started')"
+                        )->execute([$session['linked_training_session_id'], $playerId]);
+                    }
+                } else {
+                    $pdo->prepare(
+                        'UPDATE session_attendance
+                         SET elapsed_seconds = elapsed_seconds +
+                                 GREATEST(0, TIMESTAMPDIFF(SECOND, timer_started_at, UTC_TIMESTAMP())),
+                             timer_ended_at = UTC_TIMESTAMP(), timer_started_at = NULL
+                         WHERE session_id = ? AND player_id = ? AND timer_started_at IS NOT NULL'
+                    )->execute([$sessionId, $playerId]);
+                    if (!empty($session['linked_training_session_id'])) {
+                        $pdo->prepare(
+                            "UPDATE session_players SET completed_at = COALESCE(completed_at, UTC_TIMESTAMP()), status = 'completed'
+                             WHERE session_id = ? AND linked_player_id = ? AND started_at IS NOT NULL"
+                        )->execute([$session['linked_training_session_id'], $playerId]);
+                    }
+                }
+            } else {
+                $pdo->rollBack();
+                jsonOut(['error' => 'Unsupported clock operation'], 422);
+            }
+            $pdo->commit();
+            jsonOut(['success' => true]);
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            jsonOut(['error' => 'Unable to update session clock'], 500);
+        }
+    }
+
     // ── Attendance: mark which players were present/absent/late ──────────────
     if ($action === 'attendance') {
         $sessionId  = trim($body['session_id'] ?? '');
@@ -175,17 +312,18 @@ if ($method === 'POST') {
 
         if (!$sessionId) jsonOut(['error' => 'session_id required'], 400);
 
-        $ownerStmt = $pdo->prepare('SELECT id, linked_training_session_id FROM club_sessions WHERE id = ? AND user_id = ?');
-        $ownerStmt->execute([$sessionId, $user['id']]);
+        $ctx = requireClubPermission($pdo, $user, 'sessions.write');
+        $ownerStmt = $pdo->prepare('SELECT id, linked_training_session_id FROM club_sessions WHERE id = ? AND club_id = ?');
+        $ownerStmt->execute([$sessionId, $ctx['club_id']]);
         $ownerRow = $ownerStmt->fetch(PDO::FETCH_ASSOC);
         if (!$ownerRow) jsonOut(['error' => 'Session not found'], 404);
         $linkedTrainingSessionId = $ownerRow['linked_training_session_id'] ?? null;
 
         $validStatuses = ['present', 'absent', 'late'];
         $attStmt = $pdo->prepare(
-            'INSERT INTO session_attendance (session_id, player_id, user_id, status, marked_at)
-             VALUES (?, ?, ?, ?, NOW())
-             ON DUPLICATE KEY UPDATE status = VALUES(status), marked_at = VALUES(marked_at)'
+            'INSERT INTO session_attendance (session_id, player_id, user_id, club_id, status, marked_at)
+             VALUES (?, ?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE status = VALUES(status), marked_at = VALUES(marked_at), club_id = VALUES(club_id)'
         );
         // Only fires when this club_sessions row is explicitly linked to a
         // training_sessions row (linked_training_session_id) — bridges real
@@ -203,7 +341,16 @@ if ($method === 'POST') {
 
         foreach ($attendance as $playerId => $status) {
             if (!in_array($status, $validStatuses, true)) continue;
-            $attStmt->execute([$sessionId, $playerId, $user['id'], $status]);
+            $attStmt->execute([$sessionId, $playerId, $user['id'], $ctx['club_id'], $status]);
+            if ($status === 'absent') {
+                $pdo->prepare(
+                    'UPDATE session_attendance
+                     SET elapsed_seconds = elapsed_seconds + CASE WHEN timer_started_at IS NULL THEN 0
+                             ELSE GREATEST(0, TIMESTAMPDIFF(SECOND, timer_started_at, UTC_TIMESTAMP())) END,
+                         timer_ended_at = CASE WHEN timer_started_at IS NULL THEN timer_ended_at ELSE UTC_TIMESTAMP() END,
+                         timer_started_at = NULL WHERE session_id = ? AND player_id = ?'
+                )->execute([$sessionId, $playerId]);
+            }
             if ($status === 'absent' && $missedStmt) {
                 $missedStmt->execute([$linkedTrainingSessionId, $playerId]);
             }
@@ -216,9 +363,9 @@ if ($method === 'POST') {
 
         // Keep the legacy JSON summary in sync for existing report widgets
         $stmt = $pdo->prepare(
-            'UPDATE club_sessions SET completed_player_ids = ?, player_count = ? WHERE id = ? AND user_id = ?'
+            'UPDATE club_sessions SET completed_player_ids = ?, player_count = ? WHERE id = ? AND club_id = ?'
         );
-        $stmt->execute([json_encode($present), count($present), $sessionId, $user['id']]);
+        $stmt->execute([json_encode($present), count($present), $sessionId, $ctx['club_id']]);
 
         jsonOut(['success' => true, 'present_count' => count($present)]);
     }
@@ -281,6 +428,7 @@ if ($method === 'POST') {
     $sessionClubId = $sessionCtx['club_id'];
 
     // Ownership check for updates
+    $existing = false;
     if ($id) {
         $existStmt = $pdo->prepare('SELECT user_id, club_id FROM club_sessions WHERE id = ?');
         $existStmt->execute([$id]);
@@ -291,6 +439,7 @@ if ($method === 'POST') {
             if (!$sameClub && !$sameCreator) jsonOut(['error' => 'Forbidden'], 403);
         }
     }
+    $isNewSession = !$existing;
 
     $stmt = $pdo->prepare(
         'INSERT INTO club_sessions
@@ -336,45 +485,43 @@ if ($method === 'POST') {
     $completedIdsJson = is_array($completedIds) ? json_encode($completedIds) : $completedIds;
     $assessmentTypesJson = is_array($assessmentTypes) ? json_encode($assessmentTypes) : $assessmentTypes;
 
-    $stmt->execute([
-        $id,
-        $user['id'],
-        $sessionClubId,
-        $title,
-        $body['type']                ?? 'physicalAssessment',
-        $body['scope']               ?? 'team',
-        $body['status']              ?? 'scheduled',
-        $date,
-        $body['startTime']           ?? $body['start_time'] ?? '08:00',
-        $body['endTime']             ?? $body['end_time']   ?? null,
-        (int)($body['durationMin']   ?? $body['duration_min'] ?? 90),
-        $body['location']            ?? '',
-        $body['teamName']            ?? $body['team_name']  ?? null,
-        (int)($body['playerCount']   ?? $body['player_count'] ?? count($playerIds)),
-        $body['intensity']           ?? 'medium',
-        (int)(bool)($body['aiEnabled']          ?? $body['ai_enabled'] ?? false),
-        (int)(bool)($body['attendanceRequired'] ?? $body['attendance_required'] ?? false),
-        (int)(bool)($body['rpeRequired']        ?? $body['rpe_required'] ?? false),
-        (int)(bool)($body['wellnessRequired']   ?? $body['wellness_required'] ?? false),
-        $body['coachName']           ?? $body['coach_name'] ?? null,
-        $body['notes']               ?? null,
-        $playerIdsJson,
-        $completedIdsJson,
-        (int)($body['assessmentCount'] ?? $body['assessment_count'] ?? 0),
-        $assessmentTypesJson,
-        $body['position_filter']     ?? $body['positionFilter'] ?? null,
-        // Reuse the same id for the bridged training_sessions row below —
-        // always known, no separate lookup ever needed.
-        $id,
-    ]);
-
-    // Bridge into the session_players system — this is what the player's own
-    // "Today's Session" card (api/player/today-session.php) actually reads.
-    // Without this, a coach could select every player here and the session
-    // would still never show up for any of them, since that endpoint queries
-    // session_players/training_sessions, which this club_sessions row never
-    // touched before.
     try {
+        $pdo->beginTransaction();
+        $stmt->execute([
+            $id,
+            $user['id'],
+            $sessionClubId,
+            $title,
+            $body['type']                ?? 'physicalAssessment',
+            $body['scope']               ?? 'team',
+            $body['status']              ?? 'scheduled',
+            $date,
+            $body['startTime']           ?? $body['start_time'] ?? '08:00',
+            $body['endTime']             ?? $body['end_time']   ?? null,
+            (int)($body['durationMin']   ?? $body['duration_min'] ?? 90),
+            $body['location']            ?? '',
+            $body['teamName']            ?? $body['team_name']  ?? null,
+            (int)($body['playerCount']   ?? $body['player_count'] ?? count($playerIds)),
+            $body['intensity']           ?? 'medium',
+            (int)(bool)($body['aiEnabled']          ?? $body['ai_enabled'] ?? false),
+            (int)(bool)($body['attendanceRequired'] ?? $body['attendance_required'] ?? false),
+            (int)(bool)($body['rpeRequired']        ?? $body['rpe_required'] ?? false),
+            (int)(bool)($body['wellnessRequired']   ?? $body['wellness_required'] ?? false),
+            $body['coachName']           ?? $body['coach_name'] ?? null,
+            $body['notes']               ?? null,
+            $playerIdsJson,
+            $completedIdsJson,
+            (int)($body['assessmentCount'] ?? $body['assessment_count'] ?? 0),
+            $assessmentTypesJson,
+            $body['position_filter']     ?? $body['positionFilter'] ?? null,
+            // Reuse the same id for the bridged training_sessions row below —
+            // always known, no separate lookup ever needed.
+            $id,
+        ]);
+
+        // Bridge into the session_players system — this is what the player's
+        // own "Today's Session" card reads. The legacy and active session rows
+        // must commit together so the player can never receive a partial save.
         $clubId = $sessionClubId;
 
         $pdo->prepare(
@@ -427,10 +574,28 @@ if ($method === 'POST') {
             $pdo->prepare("DELETE FROM session_players WHERE session_id = ? AND status = 'assigned'")
                 ->execute([$id]);
         }
+        $pdo->commit();
+
+        // Newly scheduled session — alert the assigned players and the
+        // physical coach. Updates to an existing session stay silent to
+        // avoid re-notifying on every minor edit.
+        if ($isNewSession && $clubId) {
+            $startTime = $body['startTime'] ?? $body['start_time'] ?? '';
+            $when = "$date $startTime";
+            foreach ($linkedRows ?? [] as $cp) {
+                createNotification(
+                    $pdo, (int)$clubId, (int)$cp['linked_user_id'], 'session_scheduled',
+                    ['title' => $title, 'when' => $when], '/session/' . $id
+                );
+            }
+            notifyClubRole($pdo, (int)$clubId, 'coach', 'session_scheduled_coach', ['title' => $title, 'when' => $when], ['linked_route' => '/session/' . $id]);
+        }
     } catch (Throwable $e) {
-        // Never let the bridge break the actual session save — the coach's
-        // club_sessions write above already succeeded.
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         error_log('sessions.php: session_players bridge failed: ' . $e->getMessage());
+        jsonOut(['error' => 'Unable to save the session and player assignments'], 500);
     }
 
     jsonOut(['success' => true, 'id' => $id]);

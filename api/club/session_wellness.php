@@ -6,6 +6,7 @@ header('Access-Control-Allow-Methods: GET, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once dirname(__DIR__) . '/db.php';
+require_once dirname(__DIR__) . '/includes/club_auth.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -36,15 +37,17 @@ $user = $stmt->fetch();
 if (!$user) jsonOut(['error' => 'Invalid token'], 401);
 if (in_array($user['role'], ['player', 'parent'])) jsonOut(['error' => 'Forbidden'], 403);
 
-$uid       = (int)$user['id'];
+$ctx = requireClubPermission($pdo, $user, 'sessions.read');
+$clubId = (int)$ctx['club_id'];
+
 $sessionId = trim($_GET['session_id'] ?? '');
 if (!$sessionId) jsonOut(['error' => 'session_id is required'], 400);
 
 // Verify session belongs to this coach
 $sStmt = $pdo->prepare(
-    'SELECT id, title, date, duration_min FROM club_sessions WHERE id = ? AND user_id = ?'
+    'SELECT id, title, date, duration_min FROM club_sessions WHERE id = ? AND club_id = ?'
 );
-$sStmt->execute([$sessionId, $uid]);
+$sStmt->execute([$sessionId, $clubId]);
 $session = $sStmt->fetch();
 if (!$session) jsonOut(['error' => 'Session not found'], 404);
 
@@ -73,7 +76,7 @@ $stmt = $pdo->prepare(
      FROM session_players sp
      JOIN club_players cp
            ON cp.linked_user_id = sp.player_user_id
-          AND cp.user_id = ?
+          AND cp.club_id = ?
      LEFT JOIN player_hooper_index hi
            ON hi.user_id = sp.player_user_id
           AND (hi.session_id = ? OR hi.training_session_id = ?)
@@ -84,7 +87,7 @@ $stmt = $pdo->prepare(
      WHERE sp.session_id = ?
      ORDER BY cp.name ASC"
 );
-$stmt->execute([$uid, $sessionId, $sessionId, $sessionId, $sessionId, $sessionId]);
+$stmt->execute([$clubId, $sessionId, $sessionId, $sessionId, $sessionId, $sessionId]);
 $rows = $stmt->fetchAll();
 
 $total         = count($rows);

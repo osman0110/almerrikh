@@ -1,11 +1,49 @@
 import '../models/assessment_result_model.dart';
+import '../services/balance_analysis_service.dart';
 import '../services/biomechanics_service.dart';
 import '../services/exercise_engine.dart';
+import '../services/jump_analysis_service.dart';
 import '../services/squat_phase_detector.dart';
 import '../services/squat_rules_engine.dart';
 
 class PhysicalAssessmentService {
+  /// Generates a unique, non-empty assessment ID.
+  /// Format: <last8charsOfPlayerId>_<testType>_<millisecondsSinceEpoch>
+  static String _generateId(String playerId, String testTypeName) {
+    final ts     = DateTime.now().millisecondsSinceEpoch;
+    final suffix = playerId.length > 8
+        ? playerId.substring(playerId.length - 8)
+        : playerId;
+    return '${suffix}_${testTypeName}_$ts';
+  }
+
+  /// Single entry point — routes each test type to its correct pipeline.
+  /// No test falls silently into squat analysis.
   static AssessmentResult analyzeSquat(
+    AssessmentTestType testType,
+    String playerId,
+    String playerName,
+    List<PoseSnapshot> frames, {
+    double? playerHeightCm,
+  }) {
+    switch (testType) {
+      case AssessmentTestType.squat:
+        return _analyzeSquatInternal(testType, playerId, playerName, frames);
+      case AssessmentTestType.countermovementJump:
+      case AssessmentTestType.squatJump:
+      case AssessmentTestType.dropJump:
+      case AssessmentTestType.singleLegDropJump:
+      case AssessmentTestType.jumpLanding:
+        return JumpAnalysisService.analyze(
+          testType, playerId, playerName, frames,
+          playerHeightCm: playerHeightCm,
+        );
+      case AssessmentTestType.singleLegBalance:
+        return BalanceAnalysisService.analyze(playerId, playerName, frames);
+    }
+  }
+
+  static AssessmentResult _analyzeSquatInternal(
     AssessmentTestType testType,
     String playerId,
     String playerName,
@@ -17,9 +55,8 @@ class PhysicalAssessmentService {
         .toList();
 
     if (validFrames.length < 12) {
-      // Insufficient quality data
       return AssessmentResult(
-        id: '',
+        id: _generateId(playerId, testType.name),
         playerId: playerId,
         playerName: playerName,
         testType: testType,
@@ -30,10 +67,51 @@ class PhysicalAssessmentService {
         controlScore: 0,
         qualityScore: 20,
         angleMetrics: {},
-        issues: ['Assessment quality too low — insufficient valid frames captured. Reposition camera and try again.'],
-        correctionTips: ['Ensure athlete is fully visible', 'Improve lighting conditions', 'Keep camera steady at hip height'],
+        issues: ['لم يتم رصد الجسم بوضوح — عدد الإطارات الصالحة غير كافٍ. حاول تحسين الإضاءة ووضع الكاميرا.'],
+        correctionTips: [
+          'تأكد من ظهور الجسم كاملاً في إطار الكاميرا',
+          'تحسين الإضاءة — تجنب الخلفية الساطعة خلف اللاعب',
+          'ثبّت الكاميرا على ارتفاع الحوض وعلى بعد 2-3 متر',
+        ],
         recommendedDrills: [],
         createdAt: DateTime.now(),
+        invalidReason: 'insufficient_frames',
+      );
+    }
+
+    // Phase 1b: Check knee landmark coverage — too many missing joints = unreliable angles
+    final framesWithKnees = validFrames.where((f) =>
+        f.landmarks.containsKey('leftKnee') && f.landmarks.containsKey('rightKnee') &&
+        f.landmarks.containsKey('leftHip')  && f.landmarks.containsKey('rightHip') &&
+        f.landmarks.containsKey('leftAnkle') && f.landmarks.containsKey('rightAnkle'),
+    ).length;
+    final kneeCoverage = framesWithKnees / validFrames.length;
+
+    if (kneeCoverage < 0.40) {
+      return AssessmentResult(
+        id: _generateId(playerId, testType.name),
+        playerId: playerId,
+        playerName: playerName,
+        testType: testType,
+        overallScore: 0,
+        movementQualityScore: 0,
+        stabilityScore: 0,
+        symmetryScore: 0,
+        controlScore: 0,
+        qualityScore: (kneeCoverage * 100).round(),
+        angleMetrics: {},
+        issues: [
+          'لم يتم رصد مفاصل الركبة والكاحل بوضوح في معظم الإطارات (تغطية: ${(kneeCoverage * 100).round()}%). '
+          'النتائج ستكون مضللة — يُفضل إعادة التقييم.',
+        ],
+        correctionTips: [
+          'تأكد من ظهور القدمين والكاحلين والركبتين بالكامل في الإطار',
+          'أبعد الكاميرا قليلاً حتى يظهر الجسم كاملاً من الرأس إلى القدمين',
+          'تجنب الملابس الداكنة على خلفية داكنة',
+        ],
+        recommendedDrills: [],
+        createdAt: DateTime.now(),
+        invalidReason: 'low_visibility',
       );
     }
 
@@ -41,18 +119,16 @@ class PhysicalAssessmentService {
     final squat = BiomechanicsService.analyzeSquatSequence(validFrames);
 
     // Phase 3: Detect squat phases (descent/bottom/ascent)
-    final leftKneeAngles = validFrames
-        .map((f) {
-          final m = BiomechanicsService.analyzePose(f);
-          return m.leftKneeAngle;
-        })
-        .toList();
-    final rightKneeAngles = validFrames
-        .map((f) {
-          final m = BiomechanicsService.analyzePose(f);
-          return m.rightKneeAngle;
-        })
-        .toList();
+    // 0.0 is the "missing landmark" sentinel from analyzePose — replace with 180.0
+    // so the phase detector treats those frames as "standing" rather than "deep squat".
+    final leftKneeAngles = validFrames.map((f) {
+      final a = BiomechanicsService.analyzePose(f).leftKneeAngle;
+      return a > 0 ? a : 180.0;
+    }).toList();
+    final rightKneeAngles = validFrames.map((f) {
+      final a = BiomechanicsService.analyzePose(f).rightKneeAngle;
+      return a > 0 ? a : 180.0;
+    }).toList();
 
     final repMetrics = SquatPhaseDetector.detectPhases(leftKneeAngles, rightKneeAngles);
 
@@ -100,7 +176,7 @@ class PhysicalAssessmentService {
     };
 
     return AssessmentResult(
-      id: '',
+      id: _generateId(playerId, testType.name),
       playerId: playerId,
       playerName: playerName,
       testType: testType,

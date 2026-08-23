@@ -57,11 +57,17 @@ $playerId = $stmt->fetchColumn();
 if (!$playerId) jsonOut(['sessions' => []]);
 
 $stmt = $pdo->prepare(
-    'SELECT id, scheduled_at, duration_minutes, room, body_area, session_reason,
-            treatment_type, status, recommendation
-     FROM physio_sessions
-     WHERE player_id = ?
-     ORDER BY scheduled_at DESC
+    'SELECT sp.id, s.scheduled_at, s.duration_minutes, s.room, s.body_area, s.session_reason,
+            s.treatment_type, sp.status, sp.recommendation,
+            COALESCE(cs.staff_role, u.role) AS therapist_role
+     FROM physio_session_players sp
+     JOIN physio_sessions s ON s.id = sp.session_id
+     LEFT JOIN users u ON u.id = s.therapist_user_id
+     LEFT JOIN club_staff cs ON cs.user_id = s.therapist_user_id
+                            AND cs.club_id = s.club_id
+                            AND cs.status = \'active\'
+     WHERE sp.player_id = ?
+     ORDER BY s.scheduled_at DESC
      LIMIT 30'
 );
 $stmt->execute([$playerId]);
@@ -76,6 +82,7 @@ $sessions = array_map(function ($s) {
         'treatment_type'   => $s['treatment_type'],
         'status'           => $s['status'],
         'recommendation'   => $s['recommendation'],
+        'therapist_role'   => $s['therapist_role'],
     ];
 }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 

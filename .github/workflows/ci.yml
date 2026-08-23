@@ -1,0 +1,58 @@
+name: CI
+
+# Minimal safety net — catches regressions before they reach the audit/QA
+# cycle. Deliberately scoped, not a full DevOps pipeline (per project
+# convention, see CLAUDE.md "no over-engineering"):
+#   - Flutter: format check, analyzer, unit tests, debug build (no signing
+#     secrets required).
+#   - PHP: syntax lint + the pure (no-DB) regression tests only. The
+#     DB-integration tests (p0_scope_integration_test.php,
+#     p0_attendance_scope_test.php) need an approved isolated test database
+#     per api/migrations/p0/README.md and are intentionally NOT run here —
+#     wiring a disposable schema for CI is a separate, larger piece of work
+#     that needs its own review, not something to bolt on silently.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.8'
+          channel: 'stable'
+      - run: flutter pub get
+      - name: Format check
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Analyze
+        run: flutter analyze
+      - name: Unit tests
+        run: flutter test
+      - name: Debug build validation (Android)
+        run: flutter build apk --debug
+
+  php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+      - name: Syntax lint
+        run: |
+          find api -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Pure regression tests (no DB required)
+        run: |
+          php api/tests/p0_acwr_calculator_test.php
+          php api/tests/p0_body_composition_completeness_test.php
+          php api/tests/p0_rpe_identity_test.php
+          php api/tests/p0_training_load_quality_test.php
+          php api/tests/p0_sessions_write_permission_test.php
+          php api/tests/p0_rbac_capability_matrix_test.php
+          php api/tests/training_load_calculator_pure_test.php

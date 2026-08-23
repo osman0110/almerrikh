@@ -22,6 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 require_once dirname(__DIR__) . '/db.php';
 require_once dirname(__DIR__) . '/includes/club_auth.php';
 require_once dirname(__DIR__) . '/includes/player_status.php';
+require_once dirname(__DIR__) . '/includes/notifications.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -98,8 +99,10 @@ if ($method === 'GET') {
     // Today's physio sessions (status only — no specialist notes/contraindications).
     $physioByPlayer = [];
     $stmt = $pdo->prepare(
-        'SELECT player_id, status FROM physio_sessions
-         WHERE club_id = ? AND DATE(scheduled_at) = ?'
+        'SELECT sp.player_id, sp.status
+         FROM physio_session_players sp
+         JOIN physio_sessions s ON s.id = sp.session_id
+         WHERE s.club_id = ? AND DATE(s.scheduled_at) = ?'
     );
     $stmt->execute([$ctx['club_id'], $date]);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -189,6 +192,34 @@ if ($method === 'POST') {
     $ctx    = requireClubPermission($pdo, $user, 'daily_readiness.write');
     $body   = json_decode(file_get_contents('php://input'), true) ?? [];
     $action = trim($body['action'] ?? '');
+
+    if ($action === 'send_reminder') {
+        $date = trim($body['date'] ?? date('Y-m-d'));
+        $stmt = $pdo->prepare(
+            "SELECT cp.linked_user_id
+             FROM club_players cp
+             WHERE cp.club_id = ? AND cp.is_active = 1
+               AND cp.linked_user_id IS NOT NULL
+               AND (cp.player_type IS NULL OR cp.player_type = 'club')
+               AND NOT EXISTS (
+                   SELECT 1 FROM player_hooper_index h
+                   WHERE h.user_id = cp.linked_user_id AND DATE(h.submitted_at) = ?
+               )"
+        );
+        $stmt->execute([$ctx['club_id'], $date]);
+        $userIds = array_values(array_unique(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN))));
+        foreach ($userIds as $userId) {
+            createNotification(
+                $pdo,
+                (int)$ctx['club_id'],
+                $userId,
+                'readiness_reminder',
+                ['date' => $date],
+                '/player/monitoring/hooper'
+            );
+        }
+        jsonOut(['success' => true, 'sent' => count($userIds)]);
+    }
 
     if ($action === 'set_decision') {
         $playerId = trim($body['player_id'] ?? '');

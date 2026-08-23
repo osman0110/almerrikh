@@ -1,12 +1,16 @@
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import '../../api_service.dart';
 import '../../app_colors.dart';
 import '../../app_localizations.dart';
-import '../../models/player_profile_model.dart';
 import '../../models/assessment_result_model.dart';
-import 'assessment_camera_page.dart';
-import '../../services/firebase_service.dart';
+import '../../models/player_profile_model.dart';
 import '../../services/player_service.dart';
 import '../../widgets/common_widgets.dart';
+import 'assessment_camera_page.dart';
+import 'web_pose_setup_screen.dart'
+    if (dart.library.io) 'web_pose_setup_screen_stub.dart';
 
 class PlayerSelectionPage extends StatefulWidget {
   const PlayerSelectionPage({super.key});
@@ -41,7 +45,7 @@ class _PlayerSelectionPageState extends State<PlayerSelectionPage> {
             Expanded(
               child: Builder(
                 builder: (context) {
-                  final isSignedIn = FirebaseService().uid != null;
+                  final isSignedIn = ApiService.token != null;
                   if (!isSignedIn) {
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -98,13 +102,32 @@ class _PlayerSelectionPageState extends State<PlayerSelectionPage> {
                             onTap: selectedTest == null
                                 ? null
                                 : () {
-                                    Navigator.of(context).pushNamed(
-                                      '/physical-assessment/camera',
-                                      arguments: AssessmentCameraArguments(
-                                        player: player,
-                                        testType: selectedTest!,
-                                      ),
+                                    final args = AssessmentCameraArguments(
+                                      player: player,
+                                      testType: selectedTest!,
                                     );
+                                    if (kIsWeb) {
+                                      Navigator.of(context).push(MaterialPageRoute(
+                                        builder: (_) => WebPoseSetupScreen(cameraArgs: args),
+                                      ));
+                                      return;
+                                    }
+                                    Navigator.of(context).push(
+                                        PageRouteBuilder(
+                                          pageBuilder: (_, __, ___) =>
+                                              AssessmentCameraPage(
+                                                player: args.player,
+                                                testType: args.testType,
+                                              ),
+                                          transitionsBuilder:
+                                              (_, anim, __, child) =>
+                                                  FadeTransition(
+                                                      opacity: anim,
+                                                      child: child),
+                                          transitionDuration:
+                                              const Duration(milliseconds: 200),
+                                        ),
+                                      );
                                   },
                             child: Container(
                               padding: const EdgeInsets.all(16),
@@ -119,7 +142,7 @@ class _PlayerSelectionPageState extends State<PlayerSelectionPage> {
                                     radius: 26,
                                     backgroundColor: AppColors.surface2,
                                     backgroundImage: player.photoUrl != null
-                                        ? NetworkImage(player.photoUrl!)
+                                        ? CachedNetworkImageProvider(player.photoUrl!)
                                         : null,
                                     child: player.photoUrl == null
                                         ? Text(player.name.isNotEmpty ? player.name[0] : '?')
@@ -137,11 +160,15 @@ class _PlayerSelectionPageState extends State<PlayerSelectionPage> {
                                             fontWeight: FontWeight.w900,
                                             fontSize: 16,
                                           ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                         const SizedBox(height: 6),
                                         Text(
                                           '${player.position ?? AppLocalizations.get('unknown_position')} • ${player.team ?? AppLocalizations.get('unknown_team')}',
                                           style: const TextStyle(color: Colors.white70),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ],
                                     ),
@@ -191,10 +218,15 @@ class _PlayerSelectionPageState extends State<PlayerSelectionPage> {
     );
   }
 
+  // Tests that are not yet fully implemented
+  static bool _isComingSoon(AssessmentTestType t) =>
+      t == AssessmentTestType.singleLegBalance ||
+      t == AssessmentTestType.jumpLanding;
+
   Widget _buildTestSelector() {
     final tests = AssessmentTestType.values;
     return SizedBox(
-      height: 120,
+      height: 130,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         scrollDirection: Axis.horizontal,
@@ -203,34 +235,81 @@ class _PlayerSelectionPageState extends State<PlayerSelectionPage> {
         itemBuilder: (context, index) {
           final test = tests[index];
           final active = selectedTest == test;
+          final comingSoon = _isComingSoon(test);
           return GestureDetector(
-            onTap: () => setState(() => selectedTest = test),
+            onTap: comingSoon
+                ? () => ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(AppLocalizations.get('coming_soon_description')),
+                        backgroundColor: AppColors.card,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    )
+                : () => setState(() => selectedTest = test),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 220),
-              width: 180,
+              width: 190,
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: active ? AppColors.primary : AppColors.card,
+                color: comingSoon
+                    ? AppColors.card.withOpacity(0.5)
+                    : active ? AppColors.primary : AppColors.card,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: active ? AppColors.primary : AppColors.border),
+                border: Border.all(
+                  color: comingSoon
+                      ? AppColors.border.withOpacity(0.4)
+                      : active ? AppColors.primary : AppColors.border,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    test.displayName,
-                    style: TextStyle(
-                      color: active ? Colors.black : Colors.white,
-                      fontWeight: FontWeight.w900,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          test.displayName,
+                          style: TextStyle(
+                            color: comingSoon
+                                ? Colors.white38
+                                : active ? Colors.black : Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (comingSoon)
+                        Container(
+                          margin: const EdgeInsetsDirectional.only(start: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white10,
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Text(
+                            AppLocalizations.get('coming_soon_label'),
+                            style: const TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
-                    AppLocalizations.get('assessment_test_short_${test.id}'),
+                    comingSoon
+                        ? AppLocalizations.get('coming_soon_description')
+                        : AppLocalizations.get('assessment_test_short_${test.id}'),
                     style: TextStyle(
-                      color: active ? Colors.black87 : Colors.white70,
-                      fontSize: 12,
+                      color: comingSoon
+                          ? Colors.white24
+                          : active ? Colors.black87 : Colors.white70,
+                      fontSize: 11,
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),

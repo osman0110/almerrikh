@@ -1,81 +1,81 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
+﻿import 'dart:convert';
+import '../utils/app_logger.dart';
+import 'package:http/http.dart' as http;
+import '../api_service.dart';
+import '../app_config.dart';
 import '../models/player_profile_model.dart';
-import 'firebase_service.dart';
+
+const _baseUrl = kApiBase;
 
 class PlayerService {
   PlayerService._internal();
   static final PlayerService instance = PlayerService._internal();
 
-  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
+  static Map<String, String> get _headers => {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        if (ApiService.token != null) 'Authorization': 'Bearer ${ApiService.token}',
+      };
 
-  String? _currentUserPath() {
-    if (!Firebase.apps.isNotEmpty) {
-      return null;
-    }
-    final uid = FirebaseService().uid;
-    if (uid == null) return null;
-    return 'users/$uid';
+  // Returns a single-value stream so callers using StreamBuilder work unchanged.
+  Stream<List<PlayerProfile>> streamPlayers() {
+    return Stream.fromFuture(fetchPlayers());
   }
 
-  Stream<List<PlayerProfile>> streamPlayers() {
-    final base = _currentUserPath();
-    if (base == null) {
-      return Stream.value([]);
+  Future<List<PlayerProfile>> fetchPlayers() async {
+    if (ApiService.token == null) return [];
+    try {
+      final res = await http
+          .get(Uri.parse('$_baseUrl/players.php'), headers: _headers)
+          .timeout(const Duration(seconds: 10));
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final list = body['players'] as List<dynamic>? ?? [];
+      return list.map((e) {
+        final m = Map<String, dynamic>.from(e as Map);
+        return PlayerProfile.fromMap(m['id'] as String, m);
+      }).toList();
+    } catch (e) {
+      AppLogger.e('PlayerService.fetchPlayers', 'Request failed', e);
+      return [];
     }
-    return _firestore
-        .collection('$base/players')
-        .orderBy('name')
-        .snapshots()
-        .map((snapshot) {
-          return snapshot.docs
-              .map((doc) => PlayerProfile.fromMap(doc.id, doc.data()))
-              .toList();
-        });
   }
 
   Future<PlayerProfile> savePlayer(PlayerProfile profile) async {
-    final base = _currentUserPath();
-    if (base == null) {
-      debugPrint('Firebase disabled or user not authenticated, saving profile locally');
-      return profile.id.isEmpty
-          ? PlayerProfile.fromMap('offline-${DateTime.now().millisecondsSinceEpoch}', profile.toMap())
-          : profile;
+    final id = profile.id.isEmpty
+        ? 'player-${DateTime.now().millisecondsSinceEpoch}'
+        : profile.id;
+    final saved = profile.copyWith(id: id);
+
+    if (ApiService.token == null) return saved;
+
+    try {
+      await http
+          .post(
+            Uri.parse('$_baseUrl/players.php'),
+            headers: _headers,
+            body: jsonEncode(saved.toMap()),
+          )
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      AppLogger.e('PlayerService.savePlayer', 'Request failed', e);
     }
-    final ref = _firestore.collection('$base/players').doc(profile.id.isEmpty
-        ? null
-        : profile.id);
-    final data = profile.toMap();
-    if (profile.id.isEmpty) {
-      final created = await _firestore.collection('$base/players').add(data);
-      return PlayerProfile.fromMap(created.id, {
-        ...data,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-    }
-    await ref.set(data, SetOptions(merge: true));
-    final snapshot = await ref.get();
-    return PlayerProfile.fromMap(snapshot.id, snapshot.data() ?? {});
+    return saved;
   }
 
   Future<void> deletePlayer(String playerId) async {
-    final base = _currentUserPath();
-    if (base == null) {
-      debugPrint('Firebase disabled or user not authenticated, delete skipped');
-      return;
+    if (ApiService.token == null) return;
+    try {
+      await http
+          .delete(
+            Uri.parse('$_baseUrl/players.php?id=$playerId'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      AppLogger.e('PlayerService.deletePlayer', 'Request failed', e);
     }
-    await _firestore.doc('$base/players/$playerId').delete();
   }
 
-  Future<PlayerProfile?> getPlayerById(String playerId) async {
-    final base = _currentUserPath();
-    if (base == null) {
-      debugPrint('Firebase disabled or user not authenticated, returning null');
-      return null;
-    }
-    final snapshot = await _firestore.doc('$base/players/$playerId').get();
-    if (!snapshot.exists) return null;
-    return PlayerProfile.fromMap(snapshot.id, snapshot.data()!);
-  }
+  // Kept for any legacy callers that used Firebase seedDefaultTeamsIfEmpty
+  Future<void> seedDefaultTeamsIfEmpty() async {}
 }

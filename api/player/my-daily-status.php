@@ -70,7 +70,10 @@ $stmt->execute([$player['id'], $date]);
 $decision = $stmt->fetch(PDO::FETCH_ASSOC);
 
 $stmt = $pdo->prepare(
-    'SELECT status FROM physio_sessions WHERE player_id = ? AND DATE(scheduled_at) = ? LIMIT 1'
+    'SELECT sp.status
+     FROM physio_session_players sp
+     JOIN physio_sessions s ON s.id = sp.session_id
+     WHERE sp.player_id = ? AND DATE(s.scheduled_at) = ? LIMIT 1'
 );
 $stmt->execute([$player['id'], $date]);
 $physioToday = $stmt->fetchColumn();

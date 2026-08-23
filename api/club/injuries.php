@@ -202,8 +202,7 @@ if ($method === 'POST') {
             createNotification(
                 $pdo, $ctx['club_id'], (int)$staffUserId,
                 'injury_created',
-                'إصابة جديدة: ' . $pName,
-                trim($body['injury_type'] ?? ''),
+                ['player_name' => $pName, 'raw_body' => trim($body['injury_type'] ?? '')],
                 '/club/players/' . $playerId
             );
         }

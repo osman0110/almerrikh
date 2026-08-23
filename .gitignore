@@ -16,6 +16,23 @@ build/
 *.suo
 *.sw?
 
+# Claude Code local session state — machine-specific, not project config
+.claude/settings.local.json
+.claude/settings.json
+.claude/.proven-config-version
+.claude/proven-config.json
+.claude/worktrees/
+.claude-flow/
+
+# Scratch/build output — not part of the source
+tmp/
+output/
+
 # Removed React/Vite leftovers, kept ignored in case Windows locks a file.
 node_modules/
 .vite/
+
+# Server credentials — never commit
+api/db_credentials.php
+api/config/fcm-service-account.json
+deploy_missing_api.zip

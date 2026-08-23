@@ -105,12 +105,21 @@ if ($method === 'GET') {
     $playerId = trim($_GET['player_id'] ?? '');
     if (!$playerId) jsonOut(['success' => false, 'message' => 'player_id or plan_id is required'], 400);
 
+    // Plans use two different assignment paths: the legacy linked_player_id,
+    // AI plans use plan_players, and manual plans use session_players.
     $stmt = $pdo->prepare(
-        'SELECT * FROM training_plans
-         WHERE linked_player_id = ? AND club_id = ?
-         ORDER BY created_at DESC'
+        'SELECT DISTINCT tp.*
+         FROM training_plans tp
+         LEFT JOIN plan_players pp
+           ON pp.plan_id = tp.id AND pp.club_player_id = ?
+         LEFT JOIN training_sessions ts ON ts.plan_id = tp.id
+         LEFT JOIN session_players sp
+           ON sp.session_id = ts.id AND sp.linked_player_id = ?
+         WHERE tp.club_id = ?
+           AND (tp.linked_player_id = ? OR pp.plan_id IS NOT NULL OR sp.session_id IS NOT NULL)
+         ORDER BY tp.created_at DESC'
     );
-    $stmt->execute([$playerId, $ctx['club_id']]);
+    $stmt->execute([$playerId, $playerId, $ctx['club_id'], $playerId]);
     jsonOut(['success' => true, 'plans' => array_map('planOut', $stmt->fetchAll(PDO::FETCH_ASSOC))]);
 }
 

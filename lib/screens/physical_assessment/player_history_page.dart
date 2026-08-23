@@ -73,6 +73,8 @@ class _HistoryCard extends StatelessWidget {
                 child: Text(
                   result.testType.displayName,
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               Container(
@@ -95,11 +97,10 @@ class _HistoryCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _ValueLabel(label: AppLocalizations.get('assessment_symmetry'), value: '${result.symmetryScore}%'),
-              _ValueLabel(label: AppLocalizations.get('assessment_stability'), value: '${result.stabilityScore}%'),
-              _ValueLabel(label: AppLocalizations.get('assessment_quality'), value: '${result.qualityScore}%'),
+              Expanded(child: _ValueLabel(label: AppLocalizations.get('assessment_symmetry'), value: '${result.symmetryScore}%')),
+              Expanded(child: _ValueLabel(label: AppLocalizations.get('assessment_stability'), value: '${result.stabilityScore}%')),
+              Expanded(child: _ValueLabel(label: AppLocalizations.get('assessment_quality'), value: '${result.qualityScore}%')),
             ],
           ),
         ],
@@ -119,9 +120,15 @@ class _ValueLabel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+        Text(label,
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis),
         const SizedBox(height: 4),
-        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        Text(value,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis),
       ],
     );
   }

@@ -45,7 +45,13 @@ $cid    = (int)$ctx['club_id'];
 
 if ($method === 'GET') {
     $stmt = $pdo->prepare(
-        'SELECT c.id, c.club_id, c.season_id, c.name, c.type, c.notes, c.created_at, s.name AS season_name
+        'SELECT c.id, c.club_id, c.season_id, c.name, c.type, c.notes, c.created_at, s.name AS season_name,
+                c.yellow_card_threshold, c.suspension_matches, c.reset_yellow_cycle,
+                c.carry_cards_between_stages, c.carry_suspensions_forward,
+                c.direct_red_suspension_matches, c.two_yellows_suspension_matches,
+                c.allow_admin_override,
+                c.format_type, c.stages_count, c.win_points, c.draw_points, c.loss_points,
+                c.tie_break_rule, c.competition_status
          FROM club_competitions c
          LEFT JOIN club_seasons s ON s.id = c.season_id
          WHERE c.club_id = ? AND c.is_active = 1
@@ -70,6 +76,28 @@ if ($method === 'POST') {
     $seasonId = isset($body['season_id']) && $body['season_id'] !== '' && $body['season_id'] !== null
         ? (int)$body['season_id'] : null;
     $notes = $body['notes'] ?? null;
+    $yellowThreshold = max(1, (int)($body['yellow_card_threshold'] ?? 3));
+    $suspensionMatches = max(1, (int)($body['suspension_matches'] ?? 1));
+    $directRedMatches = max(1, (int)($body['direct_red_suspension_matches'] ?? 2));
+    $twoYellowsMatches = max(1, (int)($body['two_yellows_suspension_matches'] ?? 1));
+    $resetYellowCycle = (int)(bool)($body['reset_yellow_cycle'] ?? true);
+    $carryCards = (int)(bool)($body['carry_cards_between_stages'] ?? true);
+    $carrySuspensions = (int)(bool)($body['carry_suspensions_forward'] ?? false);
+    $allowAdminOverride = (int)(bool)($body['allow_admin_override'] ?? true);
+
+    $requestedFormat = $body['format_type'] ?? 'league';
+    $formatType = in_array($requestedFormat, ['league', 'knockout', 'groups', 'friendly'], true)
+        ? $requestedFormat : 'league';
+    $stagesCount = max(1, (int)($body['stages_count'] ?? 1));
+    $winPoints = max(0, (int)($body['win_points'] ?? 3));
+    $drawPoints = max(0, (int)($body['draw_points'] ?? 1));
+    $lossPoints = max(0, (int)($body['loss_points'] ?? 0));
+    $requestedTieBreak = $body['tie_break_rule'] ?? 'goal_difference';
+    $tieBreakRule = in_array($requestedTieBreak, ['goal_difference', 'head_to_head', 'goals_scored'], true)
+        ? $requestedTieBreak : 'goal_difference';
+    $requestedStatus = $body['competition_status'] ?? 'upcoming';
+    $competitionStatus = in_array($requestedStatus, ['upcoming', 'ongoing', 'completed'], true)
+        ? $requestedStatus : 'upcoming';
 
     $id = $body['id'] ?? null;
 
@@ -79,16 +107,34 @@ if ($method === 'POST') {
         if (!$stmt->fetch()) jsonOut(['error' => 'Competition not found'], 404);
 
         $pdo->prepare(
-            'UPDATE club_competitions SET name = ?, type = ?, season_id = ?, notes = ? WHERE id = ? AND club_id = ?'
-        )->execute([$name, $type, $seasonId, $notes, $id, $cid]);
+            'UPDATE club_competitions SET name = ?, type = ?, season_id = ?, notes = ?,
+             yellow_card_threshold = ?, suspension_matches = ?, reset_yellow_cycle = ?,
+             carry_cards_between_stages = ?, carry_suspensions_forward = ?,
+             direct_red_suspension_matches = ?, two_yellows_suspension_matches = ?,
+             allow_admin_override = ?, format_type = ?, stages_count = ?, win_points = ?,
+             draw_points = ?, loss_points = ?, tie_break_rule = ?, competition_status = ?
+             WHERE id = ? AND club_id = ?'
+        )->execute([$name, $type, $seasonId, $notes, $yellowThreshold, $suspensionMatches,
+            $resetYellowCycle, $carryCards, $carrySuspensions, $directRedMatches,
+            $twoYellowsMatches, $allowAdminOverride, $formatType, $stagesCount, $winPoints,
+            $drawPoints, $lossPoints, $tieBreakRule, $competitionStatus, $id, $cid]);
 
         jsonOut(['success' => true, 'id' => (int)$id]);
     }
 
     $stmt = $pdo->prepare(
-        'INSERT INTO club_competitions (club_id, season_id, name, type, notes) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO club_competitions
+         (club_id, season_id, name, type, notes, yellow_card_threshold, suspension_matches,
+          reset_yellow_cycle, carry_cards_between_stages, carry_suspensions_forward,
+          direct_red_suspension_matches, two_yellows_suspension_matches, allow_admin_override,
+          format_type, stages_count, win_points, draw_points, loss_points, tie_break_rule,
+          competition_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $stmt->execute([$cid, $seasonId, $name, $type, $notes]);
+    $stmt->execute([$cid, $seasonId, $name, $type, $notes, $yellowThreshold, $suspensionMatches,
+        $resetYellowCycle, $carryCards, $carrySuspensions, $directRedMatches,
+        $twoYellowsMatches, $allowAdminOverride, $formatType, $stagesCount, $winPoints,
+        $drawPoints, $lossPoints, $tieBreakRule, $competitionStatus]);
 
     jsonOut(['success' => true, 'id' => (int)$pdo->lastInsertId()]);
 }

@@ -64,17 +64,20 @@ $limit = min((int)($_GET['limit'] ?? 50), 200);
 // member may have created it), not just to whichever coach happens to match
 // this player's own roster-row owner.
 $stmt = $pdo->prepare(
-    'SELECT * FROM matches
-     WHERE (club_id = ? OR (club_id IS NULL AND user_id = ?)) AND JSON_CONTAINS(player_ids, JSON_QUOTE(?))
-     ORDER BY match_date DESC, match_time DESC LIMIT ' . $limit
+    "SELECT m.*, c.name AS competition_name,
+            (SELECT COUNT(*) FROM match_cards mc WHERE mc.match_id = m.id AND mc.player_id = ? AND mc.card_type = 'yellow') AS my_yellow_cards,
+            (SELECT COUNT(*) FROM match_cards mc WHERE mc.match_id = m.id AND mc.player_id = ? AND mc.card_type = 'red') AS my_red_cards
+     FROM matches m LEFT JOIN club_competitions c ON c.id = m.competition_id
+     WHERE (m.club_id = ? OR (m.club_id IS NULL AND m.user_id = ?)) AND JSON_CONTAINS(m.player_ids, JSON_QUOTE(?))
+     ORDER BY m.match_date DESC, m.match_time DESC LIMIT " . $limit
 );
-$stmt->execute([$player['club_id'], $player['user_id'], (string)$player['id']]);
+$stmt->execute([(string)$player['id'], (string)$player['id'], $player['club_id'], $player['user_id'], (string)$player['id']]);
 $rows = $stmt->fetchAll();
 
 // Has this player already submitted Hooper/RPE for this match? Used to hide
 // the entry button and lock the one-time submission client-side.
-$hooperStmt = $pdo->prepare('SELECT id FROM player_hooper_index WHERE user_id = ? AND session_id = ? LIMIT 1');
-$rpeStmt    = $pdo->prepare('SELECT id FROM player_rpe WHERE user_id = ? AND session_id = ? AND rpe_type = \'post\' LIMIT 1');
+$hooperStmt = $pdo->prepare('SELECT hooper_score FROM player_hooper_index WHERE user_id = ? AND session_id = ? LIMIT 1');
+$rpeStmt    = $pdo->prepare('SELECT rpe_score FROM player_rpe WHERE user_id = ? AND session_id = ? AND rpe_type = \'post\' LIMIT 1');
 
 foreach ($rows as &$r) {
     $r['wellness_required'] = (bool)$r['wellness_required'];
@@ -86,9 +89,14 @@ foreach ($rows as &$r) {
     $r['my_minutes']        = $r['player_minutes'][(string)$player['id']] ?? null;
 
     $hooperStmt->execute([$user['id'], $r['id']]);
-    $r['wellness_done'] = (bool)$hooperStmt->fetchColumn();
+    $hooperScore = $hooperStmt->fetchColumn();
+    $r['wellness_done'] = $hooperScore !== false;
+    $r['hooper_score'] = $hooperScore !== false ? (int)$hooperScore : null;
+
     $rpeStmt->execute([$user['id'], $r['id']]);
-    $r['rpe_done'] = (bool)$rpeStmt->fetchColumn();
+    $rpeScore = $rpeStmt->fetchColumn();
+    $r['rpe_done'] = $rpeScore !== false;
+    $r['rpe_score'] = $rpeScore !== false ? (int)$rpeScore : null;
 }
 unset($r);
 

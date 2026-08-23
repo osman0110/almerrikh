@@ -220,8 +220,7 @@ if ($method === 'POST') {
             createNotification(
                 $pdo, $ctx['club_id'], $assignedTo,
                 'task_assigned',
-                'مهمة جديدة: ' . $title,
-                trim($body['description'] ?? ''),
+                ['task_title' => $title, 'raw_body' => trim($body['description'] ?? '')],
                 '/club/tasks/' . $taskId
             );
         }
@@ -274,8 +273,7 @@ if ($method === 'POST') {
             createNotification(
                 $pdo, $ctx['club_id'], $notifyUserId,
                 'task_comment',
-                'تعليق جديد على مهمة: ' . $task['title'],
-                $comment,
+                ['task_title' => $task['title'], 'raw_body' => $comment],
                 '/club/tasks/' . $taskId
             );
         }

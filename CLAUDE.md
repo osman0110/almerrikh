@@ -40,6 +40,91 @@ Do NOT add extra assessment types.
 
 ---
 
+# Product Roadmap (Post-MVP — Not Current Scope)
+
+The items below describe the long-term product vision. They are NOT part of the current MVP and must not be implemented unless explicitly requested. Current work is still governed by "MVP Scope (STRICT)" above.
+
+## 1. Physical Performance (extend existing)
+
+Current foundation is solid:
+
+* physical tests / FMS
+* body composition
+* RPE and Hooper Index
+* weekly loads
+* sessions and attendance
+* readiness and risk flags
+
+Remaining work: link attendance, participation duration, injury, and rest into actual training-load calculation.
+
+## 2. Medical Module
+
+A single "injury notes" field is not enough. Needs a full injury record:
+
+* injury date, location, type, severity
+* doctor diagnosis, exams, attachments
+* player status: available / limited / unavailable / rehab / graduated return
+* treatment and rehab plan
+* Return-to-Play stages with pass criteria per stage
+* expected vs. actual return date
+* full audit/timeline of updates
+
+Coaches must NOT see sensitive medical detail — only participation status and restrictions.
+
+## 3. Physiotherapy & Massage Module
+
+Independent module linked to the medical file:
+
+* session booking
+* body-map area selection
+* session reason: recovery, pain, muscle tightness, pre/post-match
+* treatment type, duration, intensity
+* contraindications and medical alerts
+* specialist notes and player response
+* recommendation: rest / modified training / doctor follow-up / another session
+* daily schedule showing therapist/room workload
+
+## 4. Nutrition Module
+
+* allergy and dietary restriction profile
+* daily calorie/protein/carb/fluid targets
+* separate plans for training day, match day, travel, rest day
+* weight, body-fat, muscle-mass goals
+* hydration plan (before/during/after training)
+* supplements requiring doctor + nutritionist sign-off
+* daily compliance logging and alerts
+* linked to body composition, load, sleep, and injuries
+
+## 5. Unified Daily Workflow
+
+Player questionnaire → readiness check → alert to physical coach/medical staff → treatment/massage/nutrition intervention → participation status decision → log load & post-training response.
+
+Coach view is restricted to: fully available / modified training / unavailable, allowed participation duration, and general restrictions — never medical diagnosis or confidential treatment notes (unless explicitly granted access).
+
+## 6. Roles & Permissions
+
+* System admin
+* Performance manager
+* Physical coach
+* Doctor
+* Physiotherapist
+* Massage specialist
+* Nutritionist
+* Coach (readiness-status view only)
+* Player (submits questionnaires, views own plan)
+
+## 7. Execution Order (roadmap priority)
+
+1. Fix club data isolation and permissions.
+2. Complete attendance, actual exposure time, and load tracking.
+3. Build injury/rehab/return-to-play file.
+4. Build physiotherapy & massage schedule.
+5. Build nutrition, hydration, and supplements module.
+6. Build a unified daily readiness & intervention dashboard.
+7. Later: GPS and wearable device integration.
+
+---
+
 # Current Development Priority
 
 Current focus:

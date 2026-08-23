@@ -1,8 +1,8 @@
-import 'dart:math' as math;
+﻿import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/foundation.dart';
+import '../utils/app_logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum SoundEvent {
@@ -60,7 +60,7 @@ class SoundManager {
       await player.play(BytesSource(bytes));
       player.onPlayerComplete.first.then((_) => player.dispose());
     } catch (e) {
-      debugPrint('[SoundManager] play error: $e');
+      AppLogger.e('SoundManager', 'Play failed', e);
     }
   }
 

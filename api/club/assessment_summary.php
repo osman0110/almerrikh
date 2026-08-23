@@ -10,16 +10,17 @@ require_once __DIR__ . '/../db.php';
 require_once __DIR__ . '/../report_helpers.php';
 
 $user = rptAuthUser($pdo);
-$uid  = (int)$user['id'];
+$ctx = requireClubPermission($pdo, $user, 'assessments.read');
+$clubId = (int)$ctx['club_id'];
 
 // ── Fetch all active players ──────────────────────────────────────────────────
 $stmt = $pdo->prepare(
     "SELECT id, name, position, team_name, status
      FROM club_players
-     WHERE user_id = ? AND is_active = 1
+     WHERE club_id = ? AND is_active = 1
      ORDER BY name ASC"
 );
-$stmt->execute([$uid]);
+$stmt->execute([$clubId]);
 $players = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Per-player: latest assessment per type + risk analysis ────────────────────
@@ -44,14 +45,14 @@ foreach ($players as $player) {
                 control_score, movement_quality_score, angle_metrics_json,
                 DATE(created_at) AS assessed_date, created_at
          FROM assessments
-         WHERE user_id = ? AND player_id = ?
+         WHERE club_id = ? AND player_id = ?
            AND created_at = (
                SELECT MAX(a2.created_at) FROM assessments a2
-               WHERE a2.user_id = ? AND a2.player_id = ? AND a2.type = assessments.type
+               WHERE a2.club_id = ? AND a2.player_id = ? AND a2.type = assessments.type
            )
          ORDER BY created_at DESC"
     );
-    $stmt2->execute([$uid, $pid, $uid, $pid]);
+    $stmt2->execute([$clubId, $pid, $clubId, $pid]);
     $rows = $stmt2->fetchAll(PDO::FETCH_ASSOC);
 
     $byType  = [];
@@ -70,11 +71,11 @@ foreach ($players as $player) {
         // Trend: compare with previous of same type
         $prev = $pdo->prepare(
             "SELECT overall_score FROM assessments
-             WHERE user_id = ? AND player_id = ? AND type = ?
+             WHERE club_id = ? AND player_id = ? AND type = ?
                AND created_at < ?
              ORDER BY created_at DESC LIMIT 1"
         );
-        $prev->execute([$uid, $pid, $type, $row['created_at']]);
+        $prev->execute([$clubId, $pid, $type, $row['created_at']]);
         $prevRow = $prev->fetch(PDO::FETCH_ASSOC);
         $trend   = 'no_data';
         if ($prevRow) {

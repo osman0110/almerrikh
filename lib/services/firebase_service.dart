@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
+import '../utils/app_logger.dart';
 
 class FirebaseService {
   // Singleton instance to persist cache throughout the app lifecycle
@@ -35,7 +35,7 @@ class FirebaseService {
     try {
       return await _auth.signInWithEmailAndPassword(email: email, password: password);
     } catch (e) {
-      debugPrint('Login Error: $e');
+      AppLogger.e('FirebaseService.signIn', 'Auth failed', e);
       rethrow;
     }
   }
@@ -47,51 +47,61 @@ class FirebaseService {
     try {
       return await _auth.createUserWithEmailAndPassword(email: email, password: password);
     } catch (e) {
-      debugPrint('SignUp Error: $e');
+      AppLogger.e('FirebaseService.signUp', 'Auth failed', e);
       rethrow;
     }
   }
 
   Future<void> signOut() async {
+    await _firestoreSub?.cancel();
+    _firestoreSub = null;
+    await _planController?.close();
+    _planController = null;
+    _cachedPlan = null;
+    _hasFetchedPlan = false;
+    _cachedUid = null;
     if (!isInitialized) return;
-    await _auth.signOut();
+    try {
+      await _auth.signOut();
+    } catch (e) {
+      // Best-effort — the app-level logout (token clear + redirect to /auth)
+      // must proceed even if Firebase itself fails to sign out.
+      AppLogger.w('FirebaseService.signOut', 'Firebase signOut failed (${e.runtimeType})');
+    }
   }
 
   Future<void> saveProfileAndGeneratePlan(Map<String, dynamic> profileData) async {
     if (uid == null || !isInitialized) {
-      debugPrint('Firebase disabled or user not authenticated, skipping profile save');
+      AppLogger.w('FirebaseService.saveProfile', 'Firebase disabled or not authenticated — skipped');
       return;
     }
     try {
-      // 1. Save profile to Firestore
       profileData['onboardingCompleted'] = true;
       profileData['createdAt'] = FieldValue.serverTimestamp();
       profileData['updatedAt'] = FieldValue.serverTimestamp();
       profileData['xp'] = 0;
       profileData['streak'] = 0;
-      
+
       await _firestore.collection('users').doc(uid).set(profileData, SetOptions(merge: true));
 
-      // 2. Call Cloud Function to generate AI Plan
       final HttpsCallable callable = _functions.httpsCallable('generateWeeklyPlan');
       await callable.call({'trainingPath': profileData['trainingPath']});
-      
     } catch (e) {
-      debugPrint('Error generating plan: $e');
+      AppLogger.e('FirebaseService.saveProfile', 'Failed', e);
       rethrow;
     }
   }
 
   Future<void> adjustNextWeekPlan(String previousPlanId) async {
     if (!isInitialized) {
-      debugPrint('Firebase disabled, skipping adjustNextWeekPlan');
+      AppLogger.w('FirebaseService.adjustNextWeekPlan', 'Firebase disabled — skipped');
       return;
     }
     try {
       final HttpsCallable callable = _functions.httpsCallable('adjustNextWeekPlan');
       await callable.call({'previousPlanId': previousPlanId});
     } catch (e) {
-      debugPrint('Error adjusting next week plan: $e');
+      AppLogger.e('FirebaseService.adjustNextWeekPlan', 'Failed', e);
       rethrow;
     }
   }
@@ -108,7 +118,7 @@ class FirebaseService {
     required int durationMinutes,
   }) async {
     if (!isInitialized) {
-      debugPrint('Firebase disabled, skipping submitSessionResult');
+      AppLogger.w('FirebaseService.submitSessionResult', 'Firebase disabled — returning mock');
       return {
         'success': true,
         'earnedXp': (accuracy * 2).round(),
@@ -124,7 +134,7 @@ class FirebaseService {
       });
       return Map<String, dynamic>.from(result.data as Map);
     } catch (e) {
-      debugPrint('Error submitting session result: $e');
+      AppLogger.e('FirebaseService.submitSessionResult', 'Failed', e);
       rethrow;
     }
   }

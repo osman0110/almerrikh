@@ -3,6 +3,66 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../app_colors.dart';
+import '../app_localizations.dart';
+
+/// Shown instead of a screen's real body when the signed-in org role isn't
+/// allowed to view it (e.g. a non-admin staff member deep-linking to
+/// settings/staff/teams). Defense-in-depth alongside the route guard.
+class RoleAccessDeniedPage extends StatelessWidget {
+  const RoleAccessDeniedPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: AppColors.destructive.withOpacity(0.10),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.lock_outline_rounded,
+                      color: AppColors.destructive, size: 34),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  AppLocalizations.get('access_denied_title'),
+                  style: const TextStyle(
+                    color: AppColors.foreground,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  AppLocalizations.get('access_denied_body'),
+                  style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                PrimaryButton(
+                  width: 180,
+                  label: AppLocalizations.get('go_home'),
+                  onTap: () => Navigator.of(context)
+                      .pushNamedAndRemoveUntil('/', (_) => false),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({
@@ -215,11 +275,15 @@ class MetricTile extends StatelessWidget {
           const SizedBox(height: 5),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: AppColors.muted, fontSize: 11),
           ),
           const SizedBox(height: 2),
           Text(
             value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
           ),
         ],
@@ -322,6 +386,8 @@ class DarkMetric extends StatelessWidget {
           const SizedBox(height: 5),
           Text(
             value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w900,
@@ -330,6 +396,8 @@ class DarkMetric extends StatelessWidget {
           ),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: Colors.white.withOpacity(0.55),
               fontSize: 10,

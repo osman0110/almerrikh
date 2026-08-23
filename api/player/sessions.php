@@ -75,8 +75,8 @@ $rows = $stmt->fetchAll();
 
 // Has this player already submitted Hooper/RPE for this session? Used to
 // hide the entry button and lock the one-time submission client-side.
-$hooperStmt = $pdo->prepare('SELECT id FROM player_hooper_index WHERE user_id = ? AND session_id = ? LIMIT 1');
-$rpeStmt    = $pdo->prepare('SELECT id FROM player_rpe WHERE user_id = ? AND session_id = ? AND rpe_type = \'post\' LIMIT 1');
+$hooperStmt = $pdo->prepare('SELECT hooper_score FROM player_hooper_index WHERE user_id = ? AND session_id = ? LIMIT 1');
+$rpeStmt    = $pdo->prepare('SELECT rpe_score FROM player_rpe WHERE user_id = ? AND session_id = ? AND rpe_type = \'post\' LIMIT 1');
 
 foreach ($rows as &$r) {
     $r['player_ids']           = $r['player_ids'] && $r['player_ids'] !== 'null'
@@ -86,9 +86,14 @@ foreach ($rows as &$r) {
     $r['my_completed'] = in_array((string)$player['id'], $r['completed_player_ids'], true);
 
     $hooperStmt->execute([$user['id'], $r['id']]);
-    $r['wellness_done'] = (bool)$hooperStmt->fetchColumn();
+    $hooperScore = $hooperStmt->fetchColumn();
+    $r['wellness_done'] = $hooperScore !== false;
+    $r['hooper_score'] = $hooperScore !== false ? (int)$hooperScore : null;
+
     $rpeStmt->execute([$user['id'], $r['id']]);
-    $r['rpe_done'] = (bool)$rpeStmt->fetchColumn();
+    $rpeScore = $rpeStmt->fetchColumn();
+    $r['rpe_done'] = $rpeScore !== false;
+    $r['rpe_score'] = $rpeScore !== false ? (int)$rpeScore : null;
 }
 unset($r);
 

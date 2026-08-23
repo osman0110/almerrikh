@@ -70,42 +70,44 @@ class SquatBiomechanicsMetrics extends BiomechanicsMetrics {
 class BiomechanicsService {
 
   static BiomechanicsMetrics analyzePose(PoseSnapshot pose) {
-    final leftHip = pose.landmarks['leftHip'];
-    final rightHip = pose.landmarks['rightHip'];
-    final leftKnee = pose.landmarks['leftKnee'];
-    final rightKnee = pose.landmarks['rightKnee'];
-    final leftAnkle = pose.landmarks['leftAnkle'];
-    final rightAnkle = pose.landmarks['rightAnkle'];
-    final leftShoulder = pose.landmarks['leftShoulder'];
+    final leftHip      = pose.landmarks['leftHip'];
+    final rightHip     = pose.landmarks['rightHip'];
+    final leftKnee     = pose.landmarks['leftKnee'];
+    final rightKnee    = pose.landmarks['rightKnee'];
+    final leftAnkle    = pose.landmarks['leftAnkle'];
+    final rightAnkle   = pose.landmarks['rightAnkle'];
+    final leftShoulder  = pose.landmarks['leftShoulder'];
     final rightShoulder = pose.landmarks['rightShoulder'];
 
-    final leftKneeAngle = _angleBetween(leftHip, leftKnee, leftAnkle);
-    final rightKneeAngle = _angleBetween(rightHip, rightKnee, rightAnkle);
-    final leftHipAngle = _angleBetween(leftShoulder, leftHip, leftKnee);
-    final rightHipAngle = _angleBetween(rightShoulder, rightHip, rightKnee);
-    final trunkAngle = _angleBetween(leftShoulder, leftHip, rightHip);
+    // 0.0 is the explicit sentinel for "landmark absent" — excluded from averages
+    // in _averageMetrics. Never interpret 0° as a real joint angle.
+    final leftKneeAngle  = _angleBetween(leftHip,      leftKnee,  leftAnkle)  ?? 0.0;
+    final rightKneeAngle = _angleBetween(rightHip,     rightKnee, rightAnkle) ?? 0.0;
+    final leftHipAngle   = _angleBetween(leftShoulder, leftHip,   leftKnee)   ?? 0.0;
+    final rightHipAngle  = _angleBetween(rightShoulder,rightHip,  rightKnee)  ?? 0.0;
+    final trunkAngle     = _angleBetween(leftShoulder, leftHip,   rightHip)   ?? 0.0;
 
-    final shoulderLevelDifference = _horizontalDistance(leftShoulder, rightShoulder);
-    final hipLevelDifference = _horizontalDistance(leftHip, rightHip);
-
-    final centerStability = _centerStability(pose.center);
-    final visibilityScore = _visibilityScore(pose);
+    // null → 0.0 sentinel (0 = unknown level difference, better than 999)
+    final shoulderLevelDifference = _horizontalDistance(leftShoulder, rightShoulder) ?? 0.0;
+    final hipLevelDifference      = _horizontalDistance(leftHip, rightHip)           ?? 0.0;
 
     return BiomechanicsMetrics(
-      leftKneeAngle: leftKneeAngle,
+      leftKneeAngle:  leftKneeAngle,
       rightKneeAngle: rightKneeAngle,
-      leftHipAngle: leftHipAngle,
-      rightHipAngle: rightHipAngle,
-      trunkAngle: trunkAngle,
+      leftHipAngle:   leftHipAngle,
+      rightHipAngle:  rightHipAngle,
+      trunkAngle:     trunkAngle,
       shoulderLevelDifference: shoulderLevelDifference,
-      hipLevelDifference: hipLevelDifference,
-      centerStability: centerStability,
-      visibilityScore: visibilityScore,
+      hipLevelDifference:      hipLevelDifference,
+      centerStability: _centerStability(pose.center),
+      visibilityScore: _visibilityScore(pose),
     );
   }
 
-  static double _angleBetween(Offset? a, Offset? b, Offset? c) {
-    if (a == null || b == null || c == null) return 0.0;
+  /// Returns the angle at joint [b] between rays [a→b] and [c→b] in degrees.
+  /// Returns null if any landmark is missing — callers must handle null explicitly.
+  static double? _angleBetween(Offset? a, Offset? b, Offset? c) {
+    if (a == null || b == null || c == null) return null;
     final ab = a - b;
     final cb = c - b;
     final dot = ab.dx * cb.dx + ab.dy * cb.dy;
@@ -114,8 +116,10 @@ class BiomechanicsService {
     return math.acos(cos) * 180 / math.pi;
   }
 
-  static double _horizontalDistance(Offset? a, Offset? b) {
-    if (a == null || b == null) return 999.0;
+  /// Returns the vertical separation between two landmarks in normalised frame units.
+  /// Returns null if either landmark is missing.
+  static double? _horizontalDistance(Offset? a, Offset? b) {
+    if (a == null || b == null) return null;
     return (a.dy - b.dy).abs();
   }
 
@@ -158,12 +162,13 @@ class BiomechanicsService {
 
     if (validFrames.isEmpty) return _zeroSquat();
 
-    // Per-frame average knee angle (left+right) for finding bottom phase
+    // Per-frame average knee angle (left+right) for finding bottom phase.
+    // Null angles (missing landmarks) are excluded from the per-frame average.
     final frameAvgKnee = validFrames.map((f) {
       final lk = _angleBetween(f.landmarks['leftHip'], f.landmarks['leftKnee'], f.landmarks['leftAnkle']);
       final rk = _angleBetween(f.landmarks['rightHip'], f.landmarks['rightKnee'], f.landmarks['rightAnkle']);
-      final count = (lk > 0 ? 1 : 0) + (rk > 0 ? 1 : 0);
-      return count > 0 ? (lk + rk) / count : 180.0;
+      final valid = [if (lk != null) lk, if (rk != null) rk];
+      return valid.isNotEmpty ? valid.reduce((a, b) => a + b) / valid.length : 180.0;
     }).toList();
 
     // Bottom frame = minimum avg knee angle (deepest squat)
@@ -196,10 +201,10 @@ class BiomechanicsService {
     for (final f in bottomFrames) {
       final lk = _angleBetween(f.landmarks['leftHip'], f.landmarks['leftKnee'], f.landmarks['leftAnkle']);
       final rk = _angleBetween(f.landmarks['rightHip'], f.landmarks['rightKnee'], f.landmarks['rightAnkle']);
-      if (lk > 0) minLeftKnee = math.min(minLeftKnee, lk);
-      if (rk > 0) minRightKnee = math.min(minRightKnee, rk);
-      final cnt = (lk > 0 ? 1 : 0) + (rk > 0 ? 1 : 0);
-      sumBottomKnee += cnt > 0 ? (lk + rk) / cnt : 0;
+      if (lk != null) minLeftKnee  = math.min(minLeftKnee,  lk);
+      if (rk != null) minRightKnee = math.min(minRightKnee, rk);
+      final valid = [if (lk != null) lk, if (rk != null) rk];
+      sumBottomKnee += valid.isNotEmpty ? valid.reduce((a, b) => a + b) / valid.length : 0;
       final lh = f.landmarks['leftHip'];
       final rh = f.landmarks['rightHip'];
       if (lh != null && rh != null) {
@@ -232,8 +237,11 @@ class BiomechanicsService {
     }
     final kneeAlignmentScore = alignmentCount > 0 ? totalKneeAlignment / alignmentCount : 0.5;
 
-    // Movement variance across all frames
-    final kneeAngles = allMetrics.expand((m) => [m.leftKneeAngle, m.rightKneeAngle]).toList();
+    // Movement variance — exclude 0.0 sentinel values (missing landmarks)
+    final kneeAngles = allMetrics
+        .expand((m) => [m.leftKneeAngle, m.rightKneeAngle])
+        .where((a) => a > 0)
+        .toList();
     final movementVariance = _standardDeviation(kneeAngles);
 
     return SquatBiomechanicsMetrics(
@@ -313,32 +321,43 @@ class BiomechanicsService {
     return math.sqrt(variance);
   }
 
+  /// Averages a list of per-frame metrics.
+  /// Angle fields: 0.0 is the "missing landmark" sentinel — excluded from the average
+  /// so that frames with invisible joints don't pull angles toward 0°.
+  /// Level difference fields: 0.0 could also be sentinel, but it's less impactful;
+  /// we average all frames for those since perfect symmetry (0) is a valid value.
   static BiomechanicsMetrics _averageMetrics(List<BiomechanicsMetrics> metrics) {
     if (metrics.isEmpty) {
       return BiomechanicsMetrics(
-        leftKneeAngle: 0,
-        rightKneeAngle: 0,
-        leftHipAngle: 0,
-        rightHipAngle: 0,
-        trunkAngle: 0,
-        shoulderLevelDifference: 0,
-        hipLevelDifference: 0,
-        centerStability: 0,
-        visibilityScore: 0,
+        leftKneeAngle: 0, rightKneeAngle: 0, leftHipAngle: 0,
+        rightHipAngle: 0, trunkAngle: 0, shoulderLevelDifference: 0,
+        hipLevelDifference: 0, centerStability: 0, visibilityScore: 0,
       );
     }
-    final count = metrics.length.toDouble();
+
+    // Helper: average only non-zero values (0 = sentinel for missing landmark)
+    double avgNonZero(List<double> values) {
+      final valid = values.where((v) => v > 0).toList();
+      if (valid.isEmpty) return 0;
+      return valid.reduce((a, b) => a + b) / valid.length;
+    }
+
+    // Helper: unconditional average (for fields where 0 is a valid measurement)
+    double avgAll(List<double> values) {
+      if (values.isEmpty) return 0;
+      return values.reduce((a, b) => a + b) / values.length;
+    }
+
     return BiomechanicsMetrics(
-      leftKneeAngle: metrics.map((m) => m.leftKneeAngle).reduce((a, b) => a + b) / count,
-      rightKneeAngle: metrics.map((m) => m.rightKneeAngle).reduce((a, b) => a + b) / count,
-      leftHipAngle: metrics.map((m) => m.leftHipAngle).reduce((a, b) => a + b) / count,
-      rightHipAngle: metrics.map((m) => m.rightHipAngle).reduce((a, b) => a + b) / count,
-      trunkAngle: metrics.map((m) => m.trunkAngle).reduce((a, b) => a + b) / count,
-      shoulderLevelDifference:
-          metrics.map((m) => m.shoulderLevelDifference).reduce((a, b) => a + b) / count,
-      hipLevelDifference: metrics.map((m) => m.hipLevelDifference).reduce((a, b) => a + b) / count,
-      centerStability: metrics.map((m) => m.centerStability).reduce((a, b) => a + b) / count,
-      visibilityScore: metrics.map((m) => m.visibilityScore).reduce((a, b) => a + b) / count,
+      leftKneeAngle:  avgNonZero(metrics.map((m) => m.leftKneeAngle).toList()),
+      rightKneeAngle: avgNonZero(metrics.map((m) => m.rightKneeAngle).toList()),
+      leftHipAngle:   avgNonZero(metrics.map((m) => m.leftHipAngle).toList()),
+      rightHipAngle:  avgNonZero(metrics.map((m) => m.rightHipAngle).toList()),
+      trunkAngle:     avgNonZero(metrics.map((m) => m.trunkAngle).toList()),
+      shoulderLevelDifference: avgAll(metrics.map((m) => m.shoulderLevelDifference).toList()),
+      hipLevelDifference:      avgAll(metrics.map((m) => m.hipLevelDifference).toList()),
+      centerStability: avgAll(metrics.map((m) => m.centerStability).toList()),
+      visibilityScore: avgAll(metrics.map((m) => m.visibilityScore).toList()),
     );
   }
 }

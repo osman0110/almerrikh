@@ -161,6 +161,20 @@ foreach ($matchStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
     $matches[] = $match;
 }
 
+$disciplineStmt = $pdo->prepare(
+    "SELECT
+        (SELECT COUNT(*) FROM match_cards mc JOIN matches m ON m.id = mc.match_id
+         WHERE m.club_id = ? AND mc.card_type = 'yellow') AS yellow_cards,
+        (SELECT COUNT(*) FROM match_cards mc JOIN matches m ON m.id = mc.match_id
+         WHERE m.club_id = ? AND mc.card_type = 'red') AS red_cards,
+        (SELECT COUNT(DISTINCT player_id) FROM player_discipline_cycles
+         WHERE club_id = ? AND completed_at IS NULL AND current_yellow_cards > 0) AS threatened_players,
+        (SELECT COUNT(*) FROM player_suspensions
+         WHERE club_id = ? AND status = 'active') AS active_suspensions"
+);
+$disciplineStmt->execute([$clubId, $clubId, $clubId, $clubId]);
+$disciplineSummary = $disciplineStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
 jsonOut([
     'success' => true,
     'profile' => [
@@ -175,5 +189,11 @@ jsonOut([
     'players' => $players,
     'sessions' => $sessions,
     'matches' => $matches,
+    'discipline_summary' => [
+        'yellow_cards' => (int)($disciplineSummary['yellow_cards'] ?? 0),
+        'red_cards' => (int)($disciplineSummary['red_cards'] ?? 0),
+        'threatened_players' => (int)($disciplineSummary['threatened_players'] ?? 0),
+        'active_suspensions' => (int)($disciplineSummary['active_suspensions'] ?? 0),
+    ],
     'range' => ['from' => $from, 'to' => $to],
 ]);

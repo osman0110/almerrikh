@@ -54,11 +54,10 @@ if (in_array($user['role'], ['player', 'parent'], true)) {
 
 $ctx = requireClubPermission($pdo, $user, 'fitness.training_load.view');
 
-// Optional custom date range (?from=YYYY-MM-DD&to=YYYY-MM-DD) — every KPI
-// below now shares the SAME window instead of each having its own hardcoded
-// range (today / 3 days / 7 days / all-time), which is why the coach used to
-// see some numbers populated and others empty on the same screen. Defaults
-// to "today" (a single day) when not provided, matching prior behavior.
+// Optional custom date range (?from=YYYY-MM-DD&to=YYYY-MM-DD) — readiness,
+// RPE, recovery, and the period-load KPI share this exact window. The weekly
+// training-load table and ACWR retain their explicit calendar-week/trailing-
+// 28-day definitions. Defaults to "today" (a single day) when not provided.
 $dateRe = '/^\d{4}-\d{2}-\d{2}$/';
 $from = (isset($_GET['from']) && preg_match($dateRe, $_GET['from'])) ? $_GET['from'] : FitnessConfig::today();
 $to   = (isset($_GET['to'])   && preg_match($dateRe, $_GET['to']))   ? $_GET['to']   : FitnessConfig::today();
@@ -91,10 +90,12 @@ foreach ($trainingLoadRoster as $p) {
         $pdo,
         (int)($p['linked_user_id'] ?? 0),
         (string)$p['id'],
-        $referenceDate
+        $referenceDate,
+        $from
     );
     $last7 = $window['last_7_days'];
     $last28 = $window['last_28_days'];
+    $selectedRange = $window['selected_range'];
     $acwr = $window['acwr_details'];
     $playersTrainingLoad[] = [
         'player_id'           => $p['id'],
@@ -112,11 +113,14 @@ foreach ($trainingLoadRoster as $p) {
         'completeness_status' => $r['completeness_status'],
         'days'                => $r['days'], // Mon-Sun breakdown for the team training-load table
         'days_28'             => $window['days'],
+        'days_range'          => $window['days_range'],
         'sessions_count_7d'   => $last7['sessions_count'],
         'total_minutes_7d'    => $last7['total_minutes'],
         'average_rpe_7d'      => $last7['average_rpe'],
         'load_7d_preliminary' => $last7['preliminary_load'],
         'load_28d_preliminary'=> $last28['preliminary_load'],
+        'period_load_preliminary' => $selectedRange['preliminary_load'],
+        'period_data_completeness' => $selectedRange['data_completeness'],
         'missing_rpe_count'   => $last28['missing_rpe_count'],
         'missing_duration_count' => $last28['missing_duration_count'],
         'data_completeness'   => $last28['data_completeness'],
@@ -139,6 +143,8 @@ $emptyResponse = [
     'average_rpe'               => null,
     'weekly_load'               => null,
     'weekly_load_preliminary'   => null,
+    'period_load'               => null,
+    'period_load_preliminary'   => null,
     'recovery_score'            => null,
     'players_needing_attention' => 0,
     'total_checked_in'          => 0,
@@ -222,6 +228,19 @@ $teamLoadApprovable = !empty($playersTrainingLoad)
     )) === count($playersTrainingLoad);
 $weeklyLoad = $teamLoadApprovable ? $weeklyLoadPreliminary : null;
 
+// The KPI follows the selected range. `weekly_load` above remains the
+// calendar-week (Mon-Sun) value used by the weekly training-load table.
+$periodLoadPreliminary = array_sum(array_map(
+    fn(array $row) => (float)$row['period_load_preliminary'],
+    $playersTrainingLoad
+));
+$periodLoadApprovable = !empty($playersTrainingLoad)
+    && count(array_filter(
+        $playersTrainingLoad,
+        fn(array $row) => $row['period_data_completeness'] === 1.0
+    )) === count($playersTrainingLoad);
+$periodLoad = $periodLoadApprovable ? $periodLoadPreliminary : null;
+
 // ─ Recovery Score (% of team with good hooper, within range) ───────────────
 $stmt = $pdo->prepare(
     "SELECT COUNT(DISTINCT user_id) as total
@@ -297,6 +316,8 @@ jsonOut([
     'average_rpe'               => $avgRpe !== null ? round($avgRpe, 2) : null,
     'weekly_load'               => $weeklyLoad,
     'weekly_load_preliminary'   => $weeklyLoadPreliminary,
+    'period_load'               => $periodLoad,
+    'period_load_preliminary'   => $periodLoadPreliminary,
     'recovery_score'            => $recoveryScore !== null ? (int)$recoveryScore : null,
     'players_needing_attention' => $playersNeedingAttention,
     'total_checked_in'          => $totalCheckedIn,

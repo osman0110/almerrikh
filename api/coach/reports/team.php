@@ -91,6 +91,8 @@ foreach ($clubPlayers as $cp) {
         'avg_post_rpe'          => $avgRpe,
         'completion_rate'       => $summary['completion_rate_30d'],
         'training_load_7d'      => $summary['training_load_7d'],
+        'training_load_period'  => $summary['training_load_period'],
+        'training_load_period_days' => $summary['training_load_period_days'],
         'status'                => $isAtRisk ? 'at_risk' : 'ready',
     ];
     $players[] = $row;
@@ -110,7 +112,15 @@ $teamAverages = [
     'avg_hooper'          => $hCount > 0 ? round($hSum / $hCount, 1) : null,
     'avg_post_rpe'        => $rCount > 0 ? round($rSum / $rCount, 1) : null,
     'completion_rate'     => $cCount > 0 ? round($cSum / $cCount)   : 0,
-    'training_load_7d'    => $squadSize > 0 ? (int)round($lSum / $squadSize) : 0,
+    'training_load_7d'    => $rangeFrom !== null
+        ? null
+        : ($squadSize > 0 ? (int)round($lSum / $squadSize) : 0),
+    'training_load_period' => $squadSize > 0
+        ? (int)round(array_sum(array_column($players, 'training_load_period')) / $squadSize)
+        : 0,
+    'training_load_period_days' => $clubPlayers
+        ? (int)($players[0]['training_load_period_days'] ?? 7)
+        : 7,
     'squad_size'          => $squadSize,
 ];
 

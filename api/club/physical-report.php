@@ -156,7 +156,10 @@ foreach ($players as $player) {
         'is_ready' => $isReady,
         'readiness_updated_at' => $player['physical_readiness_updated_at'],
         'body_fat_percentage' => $bodyFat,
-        'weekly_load' => round((float)($load['weekly_load'] ?? 0)),
+        // This endpoint is a rolling seven-day management summary, not a
+        // Monday-Sunday calendar-week report.
+        'load_7d' => round((float)($load['weekly_load'] ?? 0)),
+        'weekly_load' => round((float)($load['weekly_load'] ?? 0)), // legacy alias
         'sessions_count' => $sessions,
     ];
 }

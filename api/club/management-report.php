@@ -68,6 +68,23 @@ foreach ($rosterStmt->fetchAll() as $p) {
     ];
 }
 
+// Current discipline cycle, separate from the season card total.
+$dStmt = $pdo->prepare(
+    'SELECT dc.player_id, MAX(dc.current_yellow_cards) AS current_yellow_cards,
+            MAX(dc.current_yellow_cards + 1 >= c.yellow_card_threshold) AS one_card_to_suspension
+     FROM player_discipline_cycles dc
+     JOIN club_competitions c ON c.id = dc.competition_id AND c.is_active = 1
+     WHERE dc.club_id = ? AND dc.completed_at IS NULL
+     GROUP BY dc.player_id'
+);
+$dStmt->execute([$cid]);
+foreach ($dStmt->fetchAll() as $row) {
+    if (isset($players[$row['player_id']])) {
+        $players[$row['player_id']]['cards']['current_yellow'] = (int)$row['current_yellow_cards'];
+        $players[$row['player_id']]['cards']['one_card_to_suspension'] = (bool)$row['one_card_to_suspension'];
+    }
+}
+
 // ── Minutes: sum player_minutes JSON across matches in range ────────────────
 $mStmt = $pdo->prepare(
     'SELECT player_minutes FROM matches WHERE club_id = ? AND match_date BETWEEN ? AND ?'

@@ -6,6 +6,7 @@ header('Access-Control-Allow-Methods: GET, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once '../db.php';
+require_once '../includes/club_auth.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -38,12 +39,14 @@ function getAuthUser(PDO $pdo): array {
 }
 
 $user = getAuthUser($pdo);
+$ctx = requireClubPermission($pdo, $user, 'players.read');
+$clubId = (int)$ctx['club_id'];
 
 $stmt = $pdo->prepare(
     'SELECT id, name, position, injury_notes FROM club_players
-     WHERE user_id = ? AND is_active = 1 ORDER BY name ASC LIMIT 20'
+     WHERE club_id = ? AND is_active = 1 ORDER BY name ASC LIMIT 20'
 );
-$stmt->execute([$user['id']]);
+$stmt->execute([$clubId]);
 $players = $stmt->fetchAll();
 
 // Get latest AI score per player
@@ -58,12 +61,12 @@ if (!empty($playerIds)) {
         INNER JOIN (
             SELECT player_id, MAX(created_at) AS max_date
             FROM assessments
-            WHERE user_id = ? AND player_id IN ($in)
+            WHERE club_id = ? AND player_id IN ($in)
             GROUP BY player_id
         ) latest ON a.player_id = latest.player_id AND a.created_at = latest.max_date
-        WHERE a.user_id = ?
+        WHERE a.club_id = ?
     ");
-    $stmt->execute(array_merge([$user['id']], $playerIds, [$user['id']]));
+    $stmt->execute(array_merge([$clubId], $playerIds, [$clubId]));
     foreach ($stmt->fetchAll() as $row) {
         $aiScores[$row['player_id']] = (int)$row['overall_score'];
     }

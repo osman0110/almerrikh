@@ -41,6 +41,8 @@ class PoseSnapshot {
     required this.tooClose,
     required this.tooFar,
     required this.lowLight,
+    this.timestampMs = 0,
+    this.likelihoods = const <String, double>{},
   });
 
   final Rect? bodyBox;
@@ -64,6 +66,13 @@ class PoseSnapshot {
   final bool tooClose;
   final bool tooFar;
   final bool lowLight;
+
+  /// Wall-clock ms when the camera frame was received (0 = unknown, e.g. web).
+  final int timestampMs;
+
+  /// Raw per-landmark likelihoods, unfiltered — quality gates need low values
+  /// too, unlike [landmarks] which drops points below the visibility cut.
+  final Map<String, double> likelihoods;
 }
 
 class ExerciseFrameState {

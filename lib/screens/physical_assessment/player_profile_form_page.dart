@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../app_colors.dart';
 import '../../app_localizations.dart';
 import '../../models/player_profile_model.dart';
-import '../../services/firebase_service.dart';
+import '../../api_service.dart';
 import '../../services/player_service.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -135,7 +135,7 @@ class _PlayerProfileFormPageState extends State<PlayerProfileFormPage> {
       return;
     }
 
-    if (FirebaseService().uid == null) {
+    if (ApiService.token == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppLocalizations.get('assessment_auth_required'))),
       );

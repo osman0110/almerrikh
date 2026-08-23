@@ -1,19 +1,29 @@
-import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../utils/app_logger.dart';
 
+import '../../api_service.dart';
+import '../../services/notification_service.dart';
 import '../../app_colors.dart';
-import '../../app_constants.dart';
 import '../../app_localizations.dart';
 import '../../app_state.dart';
+import '../organization/organization_shell.dart';
 import '../../models/club_models.dart';
+import '../../models/coach_monitoring_models.dart';
 import '../../services/club_service.dart';
-import '../../storage.dart';
+import '../../services/coach_monitoring_service.dart';
 import '../../services/firebase_service.dart';
+import '../../storage.dart';
+import 'admin_dashboard_page.dart';
+import 'club_widgets.dart';
+import 'match_detail_page.dart';
+import 'notifications_page.dart';
+import 'send_alert_page.dart';
+import 'standings_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shell – wraps every club management page with nav
+// Shell
 // ─────────────────────────────────────────────────────────────────────────────
 
 class ClubShell extends StatelessWidget {
@@ -27,125 +37,597 @@ class ClubShell extends StatelessWidget {
   final int currentIndex;
 
   static void go(BuildContext ctx, String route) =>
-      Navigator.of(ctx).pushNamedAndRemoveUntil(route, (_) => false);
+      OrganizationShell.go(ctx, route);
+
+  @override
+  Widget build(BuildContext context) => OrganizationShell(
+        organizationType: OrganizationType.club,
+        currentIndex: currentIndex,
+        child: child,
+      );
+}
+
+Future<void> _confirmSidebarLogout(BuildContext context) async {
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final confirmed = await showDialog<bool>(
+    context: context,
+    useRootNavigator: true,
+    builder: (_) => ClubConfirmDialog(
+      title: AppLocalizations.get('logout_title'),
+      body: AppLocalizations.get('logout_msg'),
+      confirmLabel: AppLocalizations.get('logout_btn'),
+    ),
+  );
+  if (confirmed != true) return;
+
+  if (context.mounted) {
+    Navigator.of(context).pop();
+  }
+
+  unawaited(NotificationService.unregisterPush());
+  unawaited(ApiService.logout());
+  unawaited(FirebaseService().signOut());
+  try {
+    await OnboardingStore().clearSignedIn();
+  } catch (e) {
+    AppLogger.w(
+      'SidebarLogout',
+      'Local sign-in state cleanup failed (${e.runtimeType})',
+    );
+  }
+
+  currentUserName = 'Player';
+  currentUserNameArabic = '';
+  currentUserNameEnglish = '';
+  currentUserAvatarUrl = '';
+  currentUserRole = UserRole.club;
+  currentOrgRole = OrgRole.staff;
+  currentPlayerType = null;
+  currentUserId = null;
+  currentTeamId = '';
+  currentTeamName = '';
+
+  if (navigator.mounted) {
+    navigator.pushNamedAndRemoveUntil('/auth', (_) => false);
+  }
+}
+
+class ClubRoleSidebarShell extends StatelessWidget {
+  const ClubRoleSidebarShell({
+    super.key,
+    required this.child,
+  });
+
+  final Widget child;
+
+  String get _accountName => currentUserName.isNotEmpty
+      ? currentUserName
+      : _currentOrgRoleLabel();
 
   @override
   Widget build(BuildContext context) {
-    final isAr = getAppLanguage() == 'ar';
-    return Directionality(
-      textDirection: isAr ? TextDirection.rtl : TextDirection.ltr,
-      child: Theme(
-        data: isAr
-            ? Theme.of(context).copyWith(
-                textTheme: GoogleFonts.tajawalTextTheme(Theme.of(context).textTheme),
-              )
-            : Theme.of(context),
-        child: Scaffold(
-          backgroundColor: AppColors.background,
-          body: SafeArea(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: maxPhoneWidth),
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      drawer: _PhysicalCoachSidebar(
+        accountName: _accountName,
+        roleLabel: _currentOrgRoleLabel(),
+      ),
+      body: Builder(
+        builder: (scaffoldContext) => PhysicalCoachSidebarScope(
+          openSidebar: () => Scaffold.of(scaffoldContext).openDrawer(),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _PhysicalCoachSidebar extends StatelessWidget {
+  const _PhysicalCoachSidebar({
+    required this.accountName,
+    required this.roleLabel,
+    this.extraItems = const [],
+  });
+
+  final String accountName;
+  final String roleLabel;
+  final List<Widget> extraItems;
+
+  String get _clubDisplay => AppLocalizations.get('club_brand_name');
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      backgroundColor: AppColors.card,
+      child: SafeArea(
+        child: Column(
+          children: [
+            // Header — the profile photo fills the entire card as a
+            // background (not a small circular avatar), with a gradient
+            // scrim behind the name/subtitle for legibility.
+            Container(
+              width: double.infinity,
+              height: 240,
+              clipBehavior: Clip.hardEdge,
+              decoration: const BoxDecoration(color: AppColors.maroonDark),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (currentUserAvatarUrl.isNotEmpty)
+                    Image.network(
+                      currentUserAvatarUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [AppColors.hero, AppColors.maroonDark],
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [AppColors.hero, AppColors.maroonDark],
+                        ),
+                      ),
+                      child: Center(
+                        child: Icon(
+                          Icons.person_rounded,
+                          size: 96,
+                          color: Color(0x40C8A34D),
+                        ),
+                      ),
+                    ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.05),
+                          Colors.black.withOpacity(0.65),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 28,
+                    right: Directionality.of(context) == TextDirection.rtl
+                        ? null
+                        : 12,
+                    left: Directionality.of(context) == TextDirection.rtl
+                        ? 12
+                        : null,
+                    child: GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.white,
+                          size: 13,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 18,
+                    right: 18,
+                    bottom: 18,
+                    child: Column(
+                      children: [
+                        Text(
+                          accountName,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                            height: 1.25,
+                          ),
+                          maxLines: 2,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '$roleLabel · $_clubDisplay',
+                          style: const TextStyle(
+                            color: AppColors.onDarkMuted,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 11,
+                          ),
+                          maxLines: 1,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
                 child: Column(
                   children: [
-                    Expanded(child: child),
-                    _ClubBottomNav(currentIndex: currentIndex),
+                    _PhysicalCoachSidebarTile(
+                      icon: Icons.person_outline_rounded,
+                      label: AppLocalizations.get('profile_label'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.of(context).pushNamed('/club/settings');
+                      },
+                    ),
+                    ...extraItems,
+                    _PhysicalCoachSidebarTile(
+                      icon: Icons.language_rounded,
+                      label: AppLocalizations.get('language_label'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showLanguageSheet(context);
+                      },
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppColors.primarySoft,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          _currentLanguageLabel,
+                          style: const TextStyle(
+                            color: AppColors.maroon,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                    _PhysicalCoachSidebarTile(
+                      icon: Icons.notifications_outlined,
+                      label: AppLocalizations.get('notifications'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const NotificationsPage()),
+                        );
+                      },
+                      trailing: Container(
+                        width: 34,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: AppColors.maroon,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Align(
+                          alignment: AlignmentDirectional.centerEnd,
+                          child: Container(
+                            width: 16,
+                            height: 16,
+                            margin: const EdgeInsetsDirectional.only(end: 2),
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    _PhysicalCoachSidebarTile(
+                      icon: Icons.emoji_events_outlined,
+                      label: AppLocalizations.get('standings_title'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const StandingsPage()),
+                        );
+                      },
+                    ),
+                    if (canSendAlerts)
+                      _PhysicalCoachSidebarTile(
+                        icon: Icons.campaign_outlined,
+                        label: AppLocalizations.get('send_alert'),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const SendAlertPage()),
+                          );
+                        },
+                      ),
+                    _PhysicalCoachSidebarTile(
+                      icon: Icons.help_outline_rounded,
+                      label: AppLocalizations.get('support_help'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showSupportSheet(context);
+                      },
+                    ),
                   ],
                 ),
               ),
             ),
+            GestureDetector(
+              onTap: () => _confirmSidebarLogout(context),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: Color(0xFFF1EEEC), width: 0.8)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.logout_rounded, color: Color(0xFF9299A5), size: 18),
+                    const SizedBox(width: 12),
+                    Text(
+                      AppLocalizations.get('logout_btn'),
+                      style: const TextStyle(
+                        color: Color(0xFF9299A5),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSupportSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                AppLocalizations.get('support_help'),
+                style: const TextStyle(
+                  color: AppColors.foreground,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 17,
+                ),
+              ),
+              const SizedBox(height: 10),
+              const _SupportContactRow(
+                icon: Icons.email_outlined,
+                value: 'support@almerrikh-sc.com',
+              ),
+              const SizedBox(height: 8),
+              const _SupportContactRow(
+                icon: Icons.phone_outlined,
+                value: '+249 900 000 000',
+              ),
+            ],
           ),
         ),
       ),
     );
   }
+
+  String get _currentLanguageLabel {
+    switch (getAppLanguage()) {
+      case 'ar':
+        return 'العربية';
+      case 'fr':
+        return 'Français';
+      default:
+        return 'English';
+    }
+  }
+
+  void _showLanguageSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (_) => const _PhysicalCoachLanguageSheet(),
+    );
+  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Bottom Navigation — enterprise minimal style
-// ─────────────────────────────────────────────────────────────────────────────
+String _currentOrgRoleLabel() {
+  switch (currentOrgRole) {
+    case OrgRole.owner:
+      return AppLocalizations.get('role_owner');
+    case OrgRole.admin:
+      return AppLocalizations.get('role_admin');
+    case OrgRole.coach:
+      return AppLocalizations.get('role_coach');
+    case OrgRole.doctor:
+      return AppLocalizations.get('role_doctor');
+    case OrgRole.physiotherapist:
+      return AppLocalizations.get('role_physiotherapist');
+    case OrgRole.nutritionist:
+      return AppLocalizations.get('role_nutritionist');
+    case OrgRole.tacticalCoach:
+      return AppLocalizations.get('role_tactical_coach');
+    case OrgRole.analyst:
+      return AppLocalizations.get('role_analyst');
+    case OrgRole.performanceManager:
+      return AppLocalizations.get('role_performance_manager');
+    case OrgRole.staff:
+      return AppLocalizations.get('role_staff');
+  }
+}
 
-class _ClubBottomNav extends StatelessWidget {
-  const _ClubBottomNav({required this.currentIndex});
-  final int currentIndex;
+class _PhysicalCoachSidebarTile extends StatelessWidget {
+  const _PhysicalCoachSidebarTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.of(context).padding.bottom;
-    final tabs = [
-      _Tab('/club', Icons.grid_view_rounded, Icons.grid_view_rounded, 'Home'),
-      _Tab('/club/players', Icons.group_rounded, Icons.group_rounded, 'Players'),
-      _Tab('/club/sessions', Icons.sports_rounded, Icons.sports_rounded, 'Sessions'),
-      _Tab('/club/reports', Icons.bar_chart_rounded, Icons.bar_chart_rounded, 'Reports'),
-      _Tab('/club/settings', Icons.settings_rounded, Icons.settings_rounded, 'Settings'),
-    ];
-
-    return Container(
-      padding: EdgeInsets.fromLTRB(4, 0, 4, math.max(6, bottom * 0.25)),
-      decoration: BoxDecoration(
-        color: const Color(0xff0A0A12),
-        border: Border(
-          top: BorderSide(color: Colors.white.withOpacity(0.06), width: 1),
-        ),
-      ),
-      child: Row(
-        children: List.generate(tabs.length, (i) {
-          final tab = tabs[i];
-          final active = i == currentIndex;
-          return Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                if (!active) ClubShell.go(context, tab.route);
-              },
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Active indicator bar
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    height: 2,
-                    width: active ? 24 : 0,
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  Icon(
-                    tab.icon,
-                    size: 21,
-                    color: active ? AppColors.primary : Colors.white.withOpacity(0.30),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    tab.label,
-                    style: TextStyle(
-                      fontSize: 9.5,
-                      fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-                      color: active ? AppColors.primary : Colors.white.withOpacity(0.30),
-                      letterSpacing: 0.2,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 6),
-                ],
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+        child: Row(
+          children: [
+            Icon(icon, color: AppColors.foreground, size: 18),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.foreground,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-          );
-        }),
+            if (trailing != null) trailing!,
+          ],
+        ),
       ),
     );
   }
 }
 
-class _Tab {
-  _Tab(this.route, this.icon, this.activeIcon, this.label);
-  final String route;
+class _SupportContactRow extends StatelessWidget {
+  const _SupportContactRow({required this.icon, required this.value});
+
   final IconData icon;
-  final IconData activeIcon;
-  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: AppColors.maroon, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.foreground,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PhysicalCoachLanguageSheet extends StatelessWidget {
+  const _PhysicalCoachLanguageSheet();
+
+  static const _languages = [
+    ('العربية', 'ar'),
+    ('English', 'en'),
+    ('Français', 'fr'),
+  ];
+
+  Future<void> _select(BuildContext context, String code) async {
+    setAppLanguage(code);
+    await OnboardingStore().setLanguage(code);
+    unawaited(ApiService.updateAccountLanguage(code));
+    if (!context.mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              AppLocalizations.get('choose_language_title'),
+              style: const TextStyle(
+                color: AppColors.foreground,
+                fontWeight: FontWeight.w900,
+                fontSize: 17,
+              ),
+            ),
+            const SizedBox(height: 14),
+            for (final language in _languages)
+              GestureDetector(
+                onTap: () => _select(context, language.$2),
+                child: Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 9),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 13,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.maroon.withOpacity(
+                      getAppLanguage() == language.$2 ? 0.12 : 0.05,
+                    ),
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(
+                      color: AppColors.maroon.withOpacity(
+                        getAppLanguage() == language.$2 ? 0.42 : 0.18,
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        language.$1,
+                        style: TextStyle(
+                          color: getAppLanguage() == language.$2
+                              ? AppColors.maroon
+                              : AppColors.foreground,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (getAppLanguage() == language.$2)
+                        const Icon(
+                          Icons.check_circle_rounded,
+                          color: AppColors.maroon,
+                          size: 19,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,2002 +641,1055 @@ class ClubDashboardPage extends StatefulWidget {
   State<ClubDashboardPage> createState() => _ClubDashboardPageState();
 }
 
-class _ClubDashboardPageState extends State<ClubDashboardPage>
-    with SingleTickerProviderStateMixin {
-  DashboardStats _stats = DashboardStats();
-  List<TrainingSession> _recentSessions = [];
-  List<ClubPlayer> _recentPlayers = [];
-  List<PlayerAssessment> _latestResults = [];
-  bool _statsLoading = false;
-  late AnimationController _shimmer;
+class _ClubDashboardPageState extends State<ClubDashboardPage> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  List<ClubPlayer> _allPlayers = [];
+  // ignore: unused_field
+  String _clubName = '';
+  bool _loading = false;
+  bool _loadError = false;
+
+  List<TrainingSession> _allSessions = [];
+  List<MatchModel> _allMatches = [];
+  List<ClubTeam> _teams = [];
+  List<ClubSeason> _seasons = [];
+  DateTime _selectedDate = DateTime.now();
+
+  ClubSeason? get _activeSeason =>
+      _seasons.where((s) => s.isActive).firstOrNull;
+
+  /// Matches that fall inside the active season's date range — used for the
+  /// small season/competition summary in the header. Purely derived from
+  /// already-loaded data, no extra permission-gated calls.
+  List<MatchModel> get _seasonMatches {
+    final season = _activeSeason;
+    if (season == null) return const [];
+    return _allMatches.where((m) =>
+        !m.matchDate.isBefore(season.startsOn) &&
+        !m.matchDate.isAfter(season.endsOn)).toList();
+  }
+
+  int get _seasonCompetitionCount => _seasonMatches
+      .map((m) => m.competitionId)
+      .whereType<int>()
+      .toSet()
+      .length;
+
+  // Memoized derived stats — computed once in setState, never in build().
+  int _readyCount     = 0;
+  int _riskCount      = 0;
+  int _fatigueCount   = 0;
+  int _injuredCount    = 0;
+  int _recoveringCount = 0;
+  int _notTrainingCount = 0;
+  int _totalMinutes    = 0;
+  int _totalYellow     = 0;
+  int _totalRed        = 0;
+  TrainingSession? _todaySession;
+
+  MatchModel? _todayMatch;
 
   @override
   void initState() {
     super.initState();
-    _shimmer = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..repeat();
     _load();
   }
 
-  @override
-  void dispose() {
-    _shimmer.dispose();
-    super.dispose();
-  }
-
   Future<void> _load() async {
-    setState(() => _statsLoading = true);
+    setState(() { _loading = true; _loadError = false; });
     try {
+      if (isOrgAdmin) {
+        final results = await Future.wait([
+          ClubService().getTeams(),
+          ApiService.getMe(),
+        ]);
+        if (!mounted) return;
+        final teams = results[0] as List<ClubTeam>;
+        final me = results[1] as Map<String, dynamic>;
+        if (teams.isNotEmpty && currentTeamId.isEmpty) {
+          currentTeamId = teams.first.id;
+          currentTeamName = teams.first.name;
+        }
+        setState(() {
+          _teams = teams;
+          _clubName =
+              me['club_name'] as String? ?? me['name'] as String? ?? '';
+          _loading = false;
+        });
+        return;
+      }
+
       final results = await Future.wait([
-        ClubService().getDashboardStats(),
         ClubService().getSessions(),
         ClubService().getPlayers(),
-        ClubService().getLatestAssessments(limit: 5),
+        CoachMonitoringService.getDashboard(),
+        ClubService().getTeams(),
+        ApiService.getMe(),
+        ClubService().getMatches(),
+        ClubService().getSeasons(),
+        ClubService().getManagementReport(),
       ]);
       if (!mounted) return;
+      final me       = results[4] as Map<String, dynamic>;
+      final teams    = results[3] as List<ClubTeam>;
+      final allP     = results[1] as List<ClubPlayer>;
+      final wellness = results[2] as CoachDashboardData;
+      final sessions = results[0] as List<TrainingSession>;
+      final matches  = results[5] as List<MatchModel>;
+      final seasons      = results[6] as List<ClubSeason>;
+      final mgmtReport   = results[7] as List<PlayerManagementReportRow>;
+
+      if (teams.isNotEmpty && currentTeamId.isEmpty) {
+        currentTeamId   = teams.first.id;
+        currentTeamName = teams.first.name;
+      }
+      // Compute derived stats once so build() never iterates lists.
+      final wPlayers   = wellness.players;
+
+      final activeNames = allP
+          .where((p) => p.status == PlayerStatus.active)
+          .map((p) => p.fullName.toLowerCase().trim())
+          .toSet();
+      final activeWellnessPlayers = wPlayers
+          .where((w) => activeNames.contains(w.name.toLowerCase().trim()))
+          .toList();
+
       setState(() {
-        _stats = results[0] as DashboardStats;
-        _recentSessions = (results[1] as List<TrainingSession>).take(3).toList();
-        _recentPlayers = (results[2] as List<ClubPlayer>).take(6).toList();
-        _latestResults = results[3] as List<PlayerAssessment>;
-        _statsLoading = false;
+        _allPlayers     = allP;
+        _clubName       = me['club_name'] as String? ?? me['name'] as String? ?? '';
+        _teams          = teams;
+        _allSessions    = sessions;
+        _allMatches     = matches;
+        _seasons        = seasons;
+
+        _readyCount = activeWellnessPlayers
+            .where((p) => p.status == 'normal')
+            .length;
+        _riskCount = activeWellnessPlayers
+            .where((p) => p.status == 'high_risk')
+            .length;
+        _fatigueCount = activeWellnessPlayers
+            .where((p) => p.status == 'moderate')
+            .length;
+        _todaySession   = _sessionForDate(_selectedDate);
+        _todayMatch     = _matchForDate(_selectedDate);
+
+        _injuredCount    = allP.where((p) => p.status == PlayerStatus.injured).length;
+        _recoveringCount = allP.where((p) => p.status == PlayerStatus.recovering).length;
+        final todayTraining = _sessionForDate(DateTime.now());
+        _notTrainingCount = todayTraining != null
+            ? (todayTraining.playerIds.length - todayTraining.completedPlayerIds.length)
+                .clamp(0, todayTraining.playerIds.length)
+            : 0;
+        _totalMinutes = mgmtReport.fold(0, (sum, r) => sum + r.minutes);
+        _totalYellow  = mgmtReport.fold(0, (sum, r) => sum + r.yellowCards);
+        _totalRed     = mgmtReport.fold(0, (sum, r) => sum + r.redCards);
       });
     } catch (e) {
-      if (mounted) setState(() => _statsLoading = false);
+      AppLogger.e('ClubDashboard', 'Load failed', e);
+      if (mounted) setState(() => _loadError = true);
     }
+    if (mounted) setState(() => _loading = false);
   }
+
+  TrainingSession? _sessionForDate(DateTime d) {
+    if (_allSessions.isEmpty) return null;
+    for (final s in _allSessions) {
+      if (s.date.year == d.year && s.date.month == d.month && s.date.day == d.day) {
+        return s;
+      }
+    }
+    return null;
+  }
+
+  MatchModel? _matchForDate(DateTime d) {
+    if (_allMatches.isEmpty) return null;
+    for (final m in _allMatches) {
+      if (m.matchDate.year == d.year && m.matchDate.month == d.month && m.matchDate.day == d.day) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  void _changeDate(DateTime d) {
+    setState(() {
+      _selectedDate = d;
+      _todaySession = _sessionForDate(d);
+      _todayMatch   = _matchForDate(d);
+    });
+  }
+
+  /// Sessions + matches from today forward, merged and sorted by date, for
+  /// the "upcoming" strip — a coach should see both without hunting in two
+  /// separate places.
+  List<_ScheduleItem> get _upcomingEvents {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final items = <_ScheduleItem>[
+      for (final s in _allSessions)
+        if (!DateTime(s.date.year, s.date.month, s.date.day).isBefore(today))
+          _ScheduleItem.session(s),
+      for (final m in _allMatches)
+        if (!DateTime(m.matchDate.year, m.matchDate.month, m.matchDate.day).isBefore(today))
+          _ScheduleItem.match(m),
+    ]..sort((a, b) => a.date.compareTo(b.date));
+    return items.take(7).toList();
+  }
+
+  bool get _isToday {
+    final now = DateTime.now();
+    return _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+  }
+
+  // ── BUILD ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return ClubShell(
       currentIndex: 0,
-      child: RefreshIndicator(
-        color: AppColors.primary,
-        backgroundColor: const Color(0xff14131E),
-        strokeWidth: 2,
-        onRefresh: _load,
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 20),
-            _buildInsightCards(),
-            const SizedBox(height: 20),
-            _buildPerformanceSection(),
-            const SizedBox(height: 20),
-            _buildQuickActions(),
-            const SizedBox(height: 24),
-            _sectionHeader('Recent Sessions', Icons.calendar_today_rounded,
-                onTap: () => Navigator.of(context).pushNamed('/club/sessions')),
-            const SizedBox(height: 12),
-            if (_statsLoading)
-              _buildListShimmer(height: 124)
-            else if (_recentSessions.isNotEmpty)
-              _buildRecentSessions()
-            else
-              _buildEmptyState(
-                icon: Icons.sports_rounded,
-                label: 'No sessions yet',
-                sub: 'Create your first training session',
-                onTap: () => Navigator.of(context).pushNamed('/club/sessions'),
+      child: Scaffold(
+        key: _scaffoldKey,
+        backgroundColor: Colors.transparent,
+        drawer: _buildSidebar(),
+        body: RefreshIndicator(
+          color: AppColors.primary,
+          backgroundColor: AppColors.card,
+          strokeWidth: 2,
+          onRefresh: _load,
+          child: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: _buildHeader()),
+              SliverToBoxAdapter(child: _buildDateBar()),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    if (_loadError && _allPlayers.isEmpty)
+                      _buildErrorState()
+                    else ...[
+                      if (_loadError) ...[
+                        _buildOfflineBanner(),
+                        const SizedBox(height: 14),
+                      ],
+                      if (isOrgAdmin)
+                        AdminDashboardSection(
+                          selectedDate: _selectedDate,
+                          notTrainingCount: _isToday
+                              ? _notTrainingCount
+                              : null,
+                        )
+                      else ...[
+                        _buildTodayEventHero(),
+                        if (_upcomingEvents.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          _buildUpcomingStrip(),
+                        ],
+                        const SizedBox(height: 14),
+                        _buildTeamSummaryGrid(),
+                      ],
+                    ],
+                  ]),
+                ),
               ),
-            const SizedBox(height: 24),
-            _sectionHeader('Squad Overview', Icons.group_rounded,
-                onTap: () => Navigator.of(context).pushNamed('/club/players')),
-            const SizedBox(height: 12),
-            if (_statsLoading)
-              _buildRowShimmer(count: 3)
-            else if (_recentPlayers.isNotEmpty)
-              _buildRecentPlayers()
-            else
-              _buildEmptyState(
-                icon: Icons.person_rounded,
-                label: 'No players added',
-                sub: 'Add players to your squad first',
-                onTap: () => Navigator.of(context).pushNamed('/club/players'),
-              ),
-            const SizedBox(height: 24),
-            _sectionHeader('Latest Assessments', Icons.assessment_rounded,
-                onTap: () => Navigator.of(context).pushNamed('/club/reports')),
-            const SizedBox(height: 12),
-            if (_statsLoading)
-              _buildRowShimmer(count: 3)
-            else if (_latestResults.isNotEmpty)
-              _buildLatestResults()
-            else
-              _buildEmptyState(
-                icon: Icons.assessment_rounded,
-                label: 'No assessments recorded',
-                sub: 'Run an AI assessment to see results here',
-                onTap: () => Navigator.of(context).pushNamed('/club/players'),
-              ),
-            const SizedBox(height: 32),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  // ── Header ──────────────────────────────────────────────────────────────────
+  // ── HEADER ───────────────────────────────────────────────────────────────
 
   Widget _buildHeader() {
-    final now = DateTime.now();
-    final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    final days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-    final dateStr = '${days[now.weekday - 1]}, ${months[now.month - 1]} ${now.day}';
+    final accountName = currentUserName.isNotEmpty
+        ? currentUserName
+        : AppLocalizations.get('club_label');
+    final roleKey = currentOrgRole == OrgRole.owner
+        ? 'role_owner'
+        : isOrgAdmin
+            ? 'role_admin'
+            : 'role_staff';
 
-    return Container(
-      padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 14, 20, 20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xff120810), Color(0xff0D0C15)],
-        ),
-        border: Border(
-          bottom: BorderSide(color: Colors.white.withOpacity(0.05), width: 1),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return RoleBrandHeader(
+      roleLabel: AppLocalizations.get(roleKey),
+      accountName: accountName,
+      onMenuTap: () => _scaffoldKey.currentState?.openDrawer(),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Top row: logo + club info + bell
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Premium club badge
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.primarySoft,
-                  border: Border.all(
-                    color: AppColors.primary.withOpacity(0.50),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.primary.withOpacity(0.18),
-                      blurRadius: 14,
-                      spreadRadius: 0,
-                    ),
-                  ],
-                ),
-                child: ClipOval(
-                  child: Image.asset(
-                    logoAsset,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Icon(
-                      Icons.shield_rounded,
-                      color: AppColors.primary,
-                      size: 22,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Text(
-                          'Al Merrikh SC',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            letterSpacing: 0.1,
-                          ),
-                        ),
-                        const SizedBox(width: 7),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.gold.withOpacity(0.10),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(
-                              color: AppColors.gold.withOpacity(0.25),
-                              width: 0.5,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 4,
-                                height: 4,
-                                decoration: const BoxDecoration(
-                                  color: AppColors.gold,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'LIVE',
-                                style: TextStyle(
-                                  color: AppColors.gold,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.8,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        Text(
-                          'Performance Hub',
-                          style: TextStyle(
-                            color: AppColors.gold.withOpacity(0.70),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.4,
-                          ),
-                        ),
-                        Container(
-                          width: 3,
-                          height: 3,
-                          margin: const EdgeInsets.symmetric(horizontal: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.18),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        Text(
-                          dateStr,
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.35),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              _NotifBell(count: _stats.playersNeedingReview),
-            ],
-          ),
-          const SizedBox(height: 14),
-          // AI status badge (UI only — no data logic)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: AppColors.primary.withOpacity(0.20),
-                width: 0.5,
+          GestureDetector(
+            onTap: () => Navigator.of(context).pushNamed('/club/search'),
+            child: const SizedBox(
+              width: 28,
+              height: 28,
+              child: Icon(
+                Icons.search_rounded,
+                color: AppColors.muted,
+                size: 20,
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withOpacity(0.55),
-                        blurRadius: 4,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  'AI Performance Active',
-                  style: TextStyle(
-                    color: AppColors.primary,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
           ),
-          const SizedBox(height: 16),
-          // Greeting + name
-          Text(
-            _greeting(),
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.45),
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            currentUserName,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 24,
-              height: 1.1,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Metric strip
-          Row(
-            children: [
-              _MetricChip(
-                value: _statsLoading ? '—' : '${_stats.totalPlayers}',
-                label: 'Players',
-                color: Colors.white,
-                zeroHint: 'No players yet',
-              ),
-              _MetricDivider(),
-              _MetricChip(
-                value: _statsLoading ? '—' : '${_stats.sessionsToday}',
-                label: 'Sessions Today',
-                color: Colors.white,
-                zeroHint: 'None scheduled',
-              ),
-              _MetricDivider(),
-              _MetricChip(
-                value: _statsLoading ? '—' : '${_stats.injuredPlayers}',
-                label: 'Injured',
-                color: _stats.injuredPlayers > 0 ? AppColors.warning : Colors.white,
-                zeroHint: 'All clear',
-              ),
-            ],
-          ),
+          const SizedBox(width: 6),
+          const NotificationBellButton(),
         ],
       ),
     );
   }
 
-  // ── Insight cards (2×2 grid) ────────────────────────────────────────────────
+  // ── Side menu — profile, switch team, settings, logout ──────────────────
 
-  Widget _buildInsightCards() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+  Widget _buildSidebar() {
+    final accountName = currentUserName.isNotEmpty
+        ? currentUserName
+        : AppLocalizations.get('club_label');
+
+    return _PhysicalCoachSidebar(
+      accountName: accountName,
+      roleLabel: _currentOrgRoleLabel(),
+      extraItems: [
+        if (_teams.length > 1)
+          _PhysicalCoachSidebarTile(
+            icon: Icons.swap_horiz_rounded,
+            label: AppLocalizations.get('switch_team'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.of(context)
+                  .pushNamed('/club/teams')
+                  .then((_) => _load());
+            },
+          ),
+        _PhysicalCoachSidebarTile(
+          icon: Icons.settings_outlined,
+          label: AppLocalizations.get('settings'),
+          onTap: () {
+            Navigator.pop(context);
+            Navigator.of(context).pushNamed('/club/settings');
+          },
+        ),
+      ],
+    );
+  }
+
+  // ── DATE BAR ─────────────────────────────────────────────────────────────
+
+  Widget _buildDateBar() {
+    return RoleHomeDateStrip(
+      selectedDate: _selectedDate,
+      onDateChanged: _changeDate,
+      onCalendarTap: _pickDate,
+      markerOf: (date) => RoleDateMarker(
+        hasMatch: _allMatches.any(
+          (match) => match.matchDate.year == date.year &&
+              match.matchDate.month == date.month &&
+              match.matchDate.day == date.day,
+        ),
+        hasSession: _allSessions.any(
+          (session) => session.date.year == date.year &&
+              session.date.month == date.month &&
+              session.date.day == date.day,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null) _changeDate(picked);
+  }
+
+  // ── A: TODAY'S EVENT (session or match) ──────────────────────────────────
+
+  Widget _buildTodayEventHero() {
+    if (_loading) {
+      return _shimmer(height: 170);
+    }
+    final s = _todaySession;
+    final m = _todayMatch;
+    if (s == null && m != null) {
+      return _buildMatchHero(m);
+    }
+    if (s == null) {
+      return _buildEmptySession();
+    }
+
+    final location = (s.location != null && s.location!.isNotEmpty)
+        ? s.location!
+        : AppLocalizations.get('location_not_set');
+    final endTime = (s.endTime != null && s.endTime!.isNotEmpty) ? s.endTime! : null;
+    final timeRange = endTime != null ? '${s.startTime} – $endTime' : s.startTime;
+    final expected = s.playerIds.length;
+    final present  = s.completedPlayerIds.length;
+
+    String statusKey;
+    switch (s.status) {
+      case 'active':    statusKey = 'status_active';    break;
+      case 'completed': statusKey = 'status_completed'; break;
+      case 'cancelled': statusKey = 'status_cancelled'; break;
+      default:          statusKey = 'status_scheduled';
+    }
+
+    String actionKey;
+    switch (s.status) {
+      case 'active':    actionKey = 'open_session_btn';  break;
+      case 'completed': actionKey = 'view_report_btn';   break;
+      case 'cancelled': actionKey = 'view_details_btn';  break;
+      default:          actionKey = 'start_session_btn';
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.maroon,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Top row: title + status badge
           Row(
             children: [
-              Expanded(child: _insightTrainingLoad()),
-              const SizedBox(width: 10),
-              Expanded(child: _insightReadiness()),
+              Text(AppLocalizations.get('today_session'),
+                  style: const TextStyle(
+                      color: AppColors.onDarkMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withOpacity(0.18)),
+                ),
+                child: Text(AppLocalizations.get(statusKey),
+                    style: const TextStyle(
+                        color: AppColors.onDark,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(s.name,
+              style: const TextStyle(
+                  color: AppColors.onDark,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 17,
+                  height: 1.2),
+              maxLines: 2),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _HeroMeta(icon: Icons.schedule_rounded, label: timeRange),
+              const SizedBox(width: 12),
+              Expanded(child: _HeroMeta(icon: Icons.location_on_rounded, label: location, clip: true)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              _HeroMeta(icon: Icons.group_rounded,
+                  label: '${AppLocalizations.get('expected_players')}: $expected'),
+              const SizedBox(width: 12),
+              _HeroMeta(icon: Icons.check_circle_outline_rounded,
+                  label: '${AppLocalizations.get('present_players')}: $present'),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: _HeroMeta(icon: Icons.person_outline_rounded,
+                    label: s.coachName.isNotEmpty ? s.coachName : AppLocalizations.get('coach_label'),
+                    clip: true),
+              ),
+              const SizedBox(width: 12),
+              _HeroMeta(icon: Icons.fitness_center_rounded, label: s.type.label),
             ],
           ),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(child: _insightInjuryRisk()),
-              const SizedBox(width: 10),
-              Expanded(child: _insightAIMotion()),
-            ],
+          // CTA button
+          GestureDetector(
+            onTap: () => _onSessionAction(s),
+            child: Container(
+              width: double.infinity,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              alignment: Alignment.center,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(AppLocalizations.get(actionKey),
+                      style: const TextStyle(
+                          color: AppColors.foreground,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14)),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Directionality.of(context) == TextDirection.rtl
+                        ? Icons.arrow_back_rounded
+                        : Icons.arrow_forward_rounded,
+                    color: AppColors.foreground,
+                    size: 17,
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _insightTrainingLoad() {
-    final hasData = !_statsLoading && _stats.sessionsToday > 0;
-    final isEmpty = !_statsLoading && _stats.sessionsToday == 0;
-    return _InsightCard(
-      icon: Icons.fitness_center_rounded,
-      title: 'Training Load',
-      accent: AppColors.primary,
-      loading: _statsLoading,
-      child: hasData
-          ? _InsightValue(
-              value: '${_stats.sessionsToday}',
-              sub: 'sessions today',
-            )
-          : isEmpty
-              ? _InsightEmpty(
-                  message: 'No sessions today',
-                  actionLabel: 'Create Session',
-                  onTap: () => Navigator.of(context).pushNamed('/club/sessions'),
-                )
-              : const SizedBox.shrink(),
-    );
+  Future<void> _onSessionAction(TrainingSession s) async {
+    if (s.status == 'scheduled') {
+      s.status = 'active';
+      final ok = await ClubService().updateSession(s);
+      if (ok) _load();
+    }
+    if (!mounted) return;
+    Navigator.of(context).pushNamed('/club/sessions/${s.id}');
   }
 
-  Widget _insightReadiness() {
-    final hasPlayers = !_statsLoading && _stats.totalPlayers > 0;
-    final noPlayers = !_statsLoading && _stats.totalPlayers == 0;
-    final pct = hasPlayers
-        ? (_stats.activePlayers / _stats.totalPlayers * 100).round()
-        : 0;
-    return _InsightCard(
-      icon: Icons.sports_score_rounded,
-      title: 'Squad Readiness',
-      accent: AppColors.gold,
-      loading: _statsLoading,
-      child: hasPlayers
-          ? _InsightValue(
-              value: '$pct%',
-              sub: '${_stats.activePlayers}/${_stats.totalPlayers} active',
-            )
-          : noPlayers
-              ? _InsightEmpty(
-                  message: 'No players added',
-                  actionLabel: 'Add Player',
-                  onTap: () => Navigator.of(context).pushNamed('/club/players'),
-                )
-              : const SizedBox.shrink(),
-    );
-  }
+  // Same hero shape as the session card above, but for a match on the
+  // selected date — keeps sessions and matches visually consistent instead
+  // of matches being invisible on the dashboard entirely.
+  Widget _buildMatchHero(MatchModel m) {
+    final timeRange = m.matchTime;
+    final location = (m.location != null && m.location!.isNotEmpty)
+        ? m.location!
+        : AppLocalizations.get('location_not_set');
 
-  Widget _insightInjuryRisk() {
-    final hasPlayers = !_statsLoading && _stats.totalPlayers > 0;
-    final noPlayers = !_statsLoading && _stats.totalPlayers == 0;
-    final injured = _stats.injuredPlayers;
-    return _InsightCard(
-      icon: Icons.medical_services_rounded,
-      title: 'Injury Risk',
-      accent: injured > 0 ? AppColors.warning : AppColors.primary,
-      loading: _statsLoading,
-      child: hasPlayers
-          ? _InsightValue(
-              value: '$injured',
-              sub: injured > 0 ? 'players injured' : 'No injuries recorded',
-              valueColor: injured > 0 ? AppColors.warning : null,
-            )
-          : noPlayers
-              ? _InsightEmpty(
-                  message: 'Add players first',
-                  actionLabel: 'View Players',
-                  onTap: () => Navigator.of(context).pushNamed('/club/players'),
-                )
-              : const SizedBox.shrink(),
-    );
-  }
-
-  Widget _insightAIMotion() {
-    final hasData = !_statsLoading &&
-        (_stats.assessmentsToday > 0 || _latestResults.isNotEmpty);
-    final noData = !_statsLoading &&
-        _stats.assessmentsToday == 0 &&
-        _latestResults.isEmpty;
-    return _InsightCard(
-      icon: Icons.auto_awesome_rounded,
-      title: 'AI Analysis',
-      accent: const Color(0xff7B68EE),
-      loading: _statsLoading,
-      child: hasData
-          ? _InsightValue(
-              value: '${_stats.assessmentsToday > 0 ? _stats.assessmentsToday : _latestResults.length}',
-              sub: _stats.assessmentsToday > 0 ? 'analyses today' : 'total analyses',
-            )
-          : noData
-              ? _InsightEmpty(
-                  message: 'No analyses yet',
-                  actionLabel: 'Start AI Test',
-                  onTap: () => Navigator.of(context).pushNamed('/club/players'),
-                )
-              : const SizedBox.shrink(),
-    );
-  }
-
-  // ── Performance section ─────────────────────────────────────────────────────
-
-  Widget _buildPerformanceSection() {
-    final hasData = !_statsLoading &&
-        (_stats.avgMovementScore > 0 || _stats.avgStabilityScore > 0);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white.withOpacity(0.05)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Text(
-                  'Squad Performance',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
-                    letterSpacing: 0.1,
-                  ),
-                ),
-                const Spacer(),
-                if (hasData)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.primarySoft,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Text(
-                      'LIVE',
-                      style: TextStyle(
-                        color: AppColors.primary,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                  )
-                else
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.04),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      'NO DATA',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.25),
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (_statsLoading) ...[
-              _ShimmerBox(width: double.infinity, height: 38, radius: 8),
-              const SizedBox(height: 12),
-              _ShimmerBox(width: double.infinity, height: 38, radius: 8),
-            ] else if (hasData) ...[
-              _PerformanceRow(
-                label: 'Movement Quality',
-                value: _stats.avgMovementScore / 100,
-                score: _stats.avgMovementScore,
-                color: AppColors.primary,
-                loading: false,
-              ),
-              const SizedBox(height: 12),
-              _PerformanceRow(
-                label: 'Stability Index',
-                value: _stats.avgStabilityScore / 100,
-                score: _stats.avgStabilityScore,
-                color: AppColors.gold,
-                loading: false,
-              ),
-            ] else ...[
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.03),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withOpacity(0.06)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.auto_awesome_rounded,
-                      color: Colors.white.withOpacity(0.18),
-                      size: 22,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'No analysis data yet',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.50),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Run an AI assessment to generate\nmovement & stability scores',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.25),
-                              fontSize: 10.5,
-                              height: 1.4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: () =>
-                          Navigator.of(context).pushNamed('/club/players'),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: AppColors.primary.withOpacity(0.30),
-                            width: 0.5,
-                          ),
-                        ),
-                        child: const Text(
-                          'Start Test',
-                          style: TextStyle(
-                            color: AppColors.primary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.maroon,
+        borderRadius: BorderRadius.circular(18),
       ),
-    );
-  }
-
-  // ── Quick actions ───────────────────────────────────────────────────────────
-
-  Widget _buildQuickActions() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 2, bottom: 12),
-            child: Text(
-              'Quick Actions',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.55),
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ),
           Row(
             children: [
-              _QuickAction(
-                icon: Icons.videocam_rounded,
-                label: 'Start AI Test',
-                accent: AppColors.primary,
-                onTap: () => Navigator.of(context).pushNamed('/club/players'),
-              ),
-              const SizedBox(width: 8),
-              _QuickAction(
-                icon: Icons.person_add_rounded,
-                label: 'Add Player',
-                accent: AppColors.gold,
-                onTap: () => Navigator.of(context).pushNamed('/club/players'),
-              ),
-              const SizedBox(width: 8),
-              _QuickAction(
-                icon: Icons.add_circle_outline_rounded,
-                label: 'New Session',
-                accent: const Color(0xff7B68EE),
-                onTap: () => Navigator.of(context).pushNamed('/club/sessions'),
-              ),
-              const SizedBox(width: 8),
-              _QuickAction(
-                icon: Icons.bar_chart_rounded,
-                label: 'Reports',
-                accent: const Color(0xff20B2AA),
-                onTap: () => Navigator.of(context).pushNamed('/club/reports'),
+              Text(AppLocalizations.get('today_match_label'),
+                  style: const TextStyle(
+                      color: AppColors.onDarkMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withOpacity(0.18)),
+                ),
+                child: Text(m.statusLabel,
+                    style: const TextStyle(
+                        color: AppColors.onDark,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600)),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Text('${AppLocalizations.get('vs_label')} ${m.opponent}',
+              style: const TextStyle(
+                  color: AppColors.onDark,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 17,
+                  height: 1.2),
+              maxLines: 2),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _HeroMeta(icon: Icons.schedule_rounded, label: timeRange),
+              const SizedBox(width: 12),
+              Expanded(child: _HeroMeta(icon: Icons.location_on_rounded, label: location, clip: true)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => MatchDetailPage(matchId: m.id))),
+            child: Container(
+              width: double.infinity,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              alignment: Alignment.center,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(AppLocalizations.get('view_details_btn'),
+                      style: const TextStyle(
+                          color: AppColors.foreground,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14)),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Directionality.of(context) == TextDirection.rtl
+                        ? Icons.arrow_back_rounded
+                        : Icons.arrow_forward_rounded,
+                    color: AppColors.foreground,
+                    size: 17,
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  // ── Recent sessions ─────────────────────────────────────────────────────────
-
-  Widget _buildRecentSessions() {
+  Widget _buildUpcomingStrip() {
+    final items = _upcomingEvents;
     return SizedBox(
-      height: 124,
+      height: 66,
       child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
         scrollDirection: Axis.horizontal,
-        itemCount: _recentSessions.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (_, i) => _SessionCard(session: _recentSessions[i]),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final item = items[i];
+          final isSelected = item.date.year == _selectedDate.year &&
+              item.date.month == _selectedDate.month &&
+              item.date.day == _selectedDate.day;
+          return GestureDetector(
+            onTap: () => _changeDate(item.date),
+            child: Container(
+              width: 92,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSelected ? AppColors.primary.withOpacity(0.14) : AppColors.card,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: isSelected ? AppColors.primary : AppColors.border,
+                    width: isSelected ? 1.4 : 1),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(item.isMatch ? Icons.sports_soccer_rounded : Icons.fitness_center_rounded,
+                        color: item.isMatch ? AppColors.maroon : AppColors.primary, size: 13),
+                    const SizedBox(width: 4),
+                    Text('${item.date.day}/${item.date.month}',
+                        style: const TextStyle(
+                            color: AppColors.muted, fontSize: 10, fontWeight: FontWeight.w700)),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text(item.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: AppColors.foreground, fontSize: 11, fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 
-  // ── Recent players ──────────────────────────────────────────────────────────
-
-  Widget _buildRecentPlayers() {
-    return Column(
-      children: _recentPlayers
-          .map((p) => Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: _PlayerRow(
-                  player: p,
-                  onTap: () => Navigator.of(context)
-                      .pushNamed('/club/players/${p.id}'),
-                ),
-              ))
-          .toList(),
-    );
-  }
-
-  // ── Latest results ──────────────────────────────────────────────────────────
-
-  Widget _buildLatestResults() {
-    return Column(
-      children: _latestResults
-          .map((a) => Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: _ResultRow(assessment: a),
-              ))
-          .toList(),
-    );
-  }
-
-  // ── Loading shimmer helpers ─────────────────────────────────────────────────
-
-  Widget _buildListShimmer({required double height}) {
-    return SizedBox(
-      height: height,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        scrollDirection: Axis.horizontal,
-        itemCount: 3,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (_, __) => _ShimmerBox(width: 190, height: height, radius: 16),
+  Widget _buildEmptySession() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+      ),
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        children: [
+          Container(
+            width: 52, height: 52,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.10),
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.primary.withOpacity(0.30)),
+            ),
+            child: const Icon(Icons.calendar_today_rounded,
+                color: AppColors.primary, size: 24),
+          ),
+          const SizedBox(height: 12),
+          Text(AppLocalizations.get('no_session_today_title'),
+              style: const TextStyle(
+                  color: AppColors.foreground,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15)),
+          const SizedBox(height: 5),
+          Text(AppLocalizations.get('tap_create_session'),
+              style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          const SizedBox(height: 16),
+          GestureDetector(
+            onTap: () async {
+              await Navigator.of(context).pushNamed('/club/sessions/new');
+              _load();
+            },
+            child: Container(
+              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(999),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withOpacity(0.30),
+                    blurRadius: 10, offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              alignment: Alignment.center,
+              child: Text(AppLocalizations.get('dash_create_btn'),
+                  style: const TextStyle(
+                      color: AppColors.foreground,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14)),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildRowShimmer({required int count}) {
+  // ── Team summary grid — ready / follow-up / injured / returning / not
+  // training today / total minutes / cards, all derived from data already
+  // loaded (players list + management report), no new endpoints needed.
+  // Anchored under the active competition (season) so the numbers read as
+  // "team summary for the currently running competition".
+
+  Widget _buildTeamSummaryGrid() {
+    if (_loading) return _shimmer(height: 130);
+    if (_allPlayers.isEmpty) return const SizedBox.shrink();
+
+    final cardsValue = '$_totalYellow / $_totalRed';
+    final season = _activeSeason;
+
     return Column(
-      children: List.generate(count, (i) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-        child: _ShimmerBox(width: double.infinity, height: 56, radius: 14),
-      )),
-    );
-  }
-
-  // ── Empty state ─────────────────────────────────────────────────────────────
-
-  Widget _buildEmptyState({
-    required IconData icon,
-    required String label,
-    required String sub,
-    VoidCallback? onTap,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionLabel(
+          icon: Icons.emoji_events_rounded,
+          title: season != null
+              ? '${AppLocalizations.get('team_summary_title')} · ${season.name}'
+              : AppLocalizations.get('team_summary_title'),
+          color: AppColors.primary,
+        ),
+        if (season != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            AppLocalizations.format('dashboard_season_summary', {
+              'season': season.name,
+              'matches': '${_seasonMatches.length}',
+              'competitions': '$_seasonCompetitionCount',
+            }),
+            style: const TextStyle(
+                color: AppColors.muted, fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+        ],
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: AppColors.card,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withOpacity(0.05)),
+            border: Border.all(color: AppColors.border),
           ),
-          child: Row(
+          child: Column(
             children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.04),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: Colors.white.withOpacity(0.20), size: 20),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.55),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      sub,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.25),
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (onTap != null)
-                Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  color: Colors.white.withOpacity(0.15),
-                  size: 14,
-                ),
+              Row(children: [
+                Expanded(child: _summaryStat('$_readyCount', AppLocalizations.get('status_ready'), AppColors.success)),
+                Expanded(child: _summaryStat('${_riskCount + _fatigueCount}', AppLocalizations.get('status_needs_followup'), AppColors.warning)),
+                Expanded(child: _summaryStat('$_injuredCount', AppLocalizations.get('status_injured'), AppColors.destructive)),
+                Expanded(child: _summaryStat('$_recoveringCount', AppLocalizations.get('status_recovering'), AppColors.primary)),
+              ]),
+              const SizedBox(height: 14),
+              const Divider(height: 1, color: AppColors.border),
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(child: _summaryStat('$_notTrainingCount', AppLocalizations.get('status_not_training'), AppColors.textSoft)),
+                Expanded(child: _summaryStat('$_totalMinutes', AppLocalizations.get('total_minutes_label'), AppColors.foreground)),
+                Expanded(child: _summaryStat(cardsValue, AppLocalizations.get('total_cards_label'), AppColors.warning)),
+              ]),
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _summaryStat(String value, String label, Color color) {
+    return Column(
+      children: [
+        Text(value,
+            style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 20)),
+        const SizedBox(height: 2),
+        Text(label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.muted, fontSize: 10.5, fontWeight: FontWeight.w600),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis),
+      ],
+    );
+  }
+
+
+  // ── Error state ───────────────────────────────────────────────────────────
+
+  Widget _buildErrorState() {
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.destructive.withOpacity(0.30)),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 56, height: 56,
+          decoration: BoxDecoration(
+              color: AppColors.destructive.withOpacity(0.10),
+              shape: BoxShape.circle),
+          child: const Icon(Icons.wifi_off_rounded,
+              color: AppColors.destructive, size: 26),
+        ),
+        const SizedBox(height: 14),
+        Text(AppLocalizations.get('error_server_connect'),
+            style: const TextStyle(
+                color: AppColors.foreground,
+                fontWeight: FontWeight.w800,
+                fontSize: 15)),
+        const SizedBox(height: 6),
+        Text(AppLocalizations.get('error_check_internet'),
+            style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+        const SizedBox(height: 18),
+        GestureDetector(
+          onTap: _load,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                    color: AppColors.primary.withOpacity(0.30),
+                    blurRadius: 12, offset: const Offset(0, 4))
+              ],
+            ),
+            child: Text(AppLocalizations.get('try_again'),
+                style: const TextStyle(
+                    color: AppColors.foreground,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13)),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildOfflineBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.warning.withOpacity(0.28)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.wifi_off_rounded,
+              color: AppColors.warning, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              AppLocalizations.get('error_network'),
+              style:
+                  const TextStyle(color: AppColors.textSoft, fontSize: 11.5),
+            ),
+          ),
+          GestureDetector(
+            onTap: _load,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 44),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              alignment: Alignment.center,
+              child: Text(
+                AppLocalizations.get('retry_btn'),
+                style: const TextStyle(
+                    color: AppColors.maroon,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // ── Section header ──────────────────────────────────────────────────────────
+  // ── Shimmer placeholder ───────────────────────────────────────────────────
 
-  Widget _sectionHeader(String title, IconData icon, {VoidCallback? onTap}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
+  Widget _shimmer({required double height}) {
+    return Container(
+      height: height,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: Colors.white.withOpacity(0.25), size: 14),
-          const SizedBox(width: 7),
-          Text(
-            title.toUpperCase(),
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.45),
-              fontWeight: FontWeight.w800,
-              fontSize: 10,
-              letterSpacing: 1.1,
+          FractionallySizedBox(
+            widthFactor: 0.42,
+            child: Container(
+              height: 10,
+              decoration: BoxDecoration(
+                color: AppColors.surface2,
+                borderRadius: BorderRadius.circular(6),
+              ),
             ),
           ),
           const Spacer(),
-          if (onTap != null)
-            GestureDetector(
-              onTap: onTap,
-              child: Row(
-                children: [
-                  Text(
-                    'See all',
-                    style: TextStyle(
-                      color: AppColors.primary.withOpacity(0.80),
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                    ),
-                  ),
-                  const SizedBox(width: 3),
-                  Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    color: AppColors.primary.withOpacity(0.70),
-                    size: 10,
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  String _greeting() {
-    final h = DateTime.now().hour;
-    if (h < 12) return 'Good morning,';
-    if (h < 17) return 'Good afternoon,';
-    return 'Good evening,';
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Metric strip helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _MetricChip extends StatelessWidget {
-  const _MetricChip({
-    required this.value,
-    required this.label,
-    required this.color,
-    this.zeroHint,
-  });
-  final String value;
-  final String label;
-  final Color color;
-  final String? zeroHint;
-
-  @override
-  Widget build(BuildContext context) {
-    final isZero = value == '0';
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w900,
-              fontSize: 22,
-              height: 1,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.35),
-              fontSize: 10,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          if (isZero && zeroHint != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              zeroHint!,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.20),
-                fontSize: 9,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricDivider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 30,
-      margin: const EdgeInsets.symmetric(horizontal: 14),
-      color: Colors.white.withOpacity(0.08),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Notification Bell
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _NotifBell extends StatelessWidget {
-  const _NotifBell({required this.count});
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withOpacity(0.07)),
-          ),
-          child: Icon(
-            Icons.notifications_outlined,
-            color: Colors.white.withOpacity(0.50),
-            size: 19,
-          ),
-        ),
-        if (count > 0)
-          Positioned(
-            right: -1,
-            top: -1,
+          FractionallySizedBox(
+            widthFactor: 0.88,
             child: Container(
-              width: 15,
-              height: 15,
-              alignment: Alignment.center,
-              decoration: const BoxDecoration(
-                color: AppColors.primary,
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                '$count',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 8.5,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Performance Row — inside the squad performance card
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _PerformanceRow extends StatelessWidget {
-  const _PerformanceRow({
-    required this.label,
-    required this.value,
-    required this.score,
-    required this.color,
-    this.loading = false,
-  });
-  final String label;
-  final double value;
-  final double score;
-  final Color color;
-  final bool loading;
-
-  @override
-  Widget build(BuildContext context) {
-    final pct = loading ? 0.0 : value.clamp(0.0, 1.0);
-    final scoreStr = loading ? '--' : score.toStringAsFixed(1);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.65),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              scoreStr,
-              style: TextStyle(
-                color: color,
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            Text(
-              ' / 100',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.25),
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Stack(
-          children: [
-            Container(
-              height: 5,
+              height: 7,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.06),
-                borderRadius: BorderRadius.circular(99),
+                color: AppColors.surface2,
+                borderRadius: BorderRadius.circular(5),
               ),
             ),
-            FractionallySizedBox(
-              widthFactor: pct,
-              child: Container(
-                height: 5,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      color.withOpacity(0.7),
-                      color,
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(99),
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withOpacity(0.4),
-                      blurRadius: 6,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-                ),
+          ),
+          const SizedBox(height: 5),
+          FractionallySizedBox(
+            widthFactor: 0.64,
+            child: Container(
+              height: 7,
+              decoration: BoxDecoration(
+                color: AppColors.surface2,
+                borderRadius: BorderRadius.circular(5),
               ),
             ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Quick Action
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _QuickAction extends StatelessWidget {
-  const _QuickAction({
-    required this.icon,
-    required this.label,
-    required this.accent,
-    required this.onTap,
-  });
-  final IconData icon;
-  final String label;
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: BoxDecoration(
-            color: AppColors.card,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white.withOpacity(0.05)),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: accent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: accent, size: 18),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Insight Card — 2×2 grid card with empty state support
+// Section label row
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _InsightCard extends StatelessWidget {
-  const _InsightCard({
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({
     required this.icon,
     required this.title,
-    required this.accent,
-    required this.child,
-    this.loading = false,
+    this.color = AppColors.maroon,
   });
   final IconData icon;
   final String title;
-  final Color accent;
-  final Widget child;
-  final bool loading;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
-      decoration: BoxDecoration(
-        color: const Color(0xff0D0C15),
-        borderRadius: BorderRadius.circular(18),
-        border: Border(
-          top: BorderSide(color: accent.withOpacity(0.45), width: 1.5),
-          left: BorderSide(color: Colors.white.withOpacity(0.05)),
-          right: BorderSide(color: Colors.white.withOpacity(0.05)),
-          bottom: BorderSide(color: Colors.white.withOpacity(0.05)),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: accent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: accent, size: 15),
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.55),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.2,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (loading)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  height: 22,
-                  width: 44,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.07),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  height: 10,
-                  width: 70,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ],
-            )
-          else
-            child,
-        ],
-      ),
-    );
-  }
-}
-
-class _InsightValue extends StatelessWidget {
-  const _InsightValue({
-    required this.value,
-    required this.sub,
-    this.valueColor,
-  });
-  final String value;
-  final String sub;
-  final Color? valueColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            color: valueColor ?? Colors.white,
-            fontWeight: FontWeight.w900,
-            fontSize: 26,
-            height: 1,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          sub,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.38),
-            fontSize: 10,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
-    );
-  }
-}
-
-class _InsightEmpty extends StatelessWidget {
-  const _InsightEmpty({
-    required this.message,
-    required this.actionLabel,
-    required this.onTap,
-  });
-  final String message;
-  final String actionLabel;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          message,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.28),
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-          ),
-          maxLines: 2,
-        ),
-        const SizedBox(height: 8),
-        GestureDetector(
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: AppColors.primary.withOpacity(0.25),
-                width: 0.5,
-              ),
-            ),
-            child: Text(
-              actionLabel,
-              style: const TextStyle(
-                color: AppColors.primary,
-                fontSize: 9.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Session Card
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SessionCard extends StatelessWidget {
-  const _SessionCard({required this.session});
-  final TrainingSession session;
-
-  @override
-  Widget build(BuildContext context) {
-    final pct = session.playerIds.isEmpty
-        ? 0.0
-        : session.completedPlayerIds.length / session.playerIds.length;
-    final pctInt = (pct * 100).round();
-
-    return GestureDetector(
-      onTap: () =>
-          Navigator.of(context).pushNamed('/club/sessions/${session.id}'),
-      child: Container(
-        width: 190,
-        padding: const EdgeInsets.all(14),
+    return Row(children: [
+      Container(
+        width: 26, height: 26,
         decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withOpacity(0.05)),
+          color: color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(8),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppColors.primarySoft,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    session.type.label.split(' ').first.toUpperCase(),
-                    style: const TextStyle(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 8.5,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '$pctInt%',
-                  style: TextStyle(
-                    color: pctInt == 100
-                        ? AppColors.success
-                        : Colors.white.withOpacity(0.55),
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              session.name,
-              style: const TextStyle(
-                color: Colors.white,
+        alignment: Alignment.center,
+        child: Icon(icon, color: color, size: 14),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(title,
+            style: const TextStyle(
+                color: AppColors.foreground,
                 fontWeight: FontWeight.w800,
-                fontSize: 13,
-                height: 1.2,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              session.teamName ?? 'No team',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.35),
-                fontSize: 10.5,
-              ),
-            ),
-            const Spacer(),
-            Stack(
-              children: [
-                Container(
-                  height: 3,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.07),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-                FractionallySizedBox(
-                  widthFactor: pct.clamp(0.0, 1.0),
-                  child: Container(
-                    height: 3,
-                    decoration: BoxDecoration(
-                      color: pctInt == 100 ? AppColors.success : AppColors.primary,
-                      borderRadius: BorderRadius.circular(99),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '${session.completedPlayerIds.length}/${session.playerIds.length} assessed',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.30),
-                fontSize: 9.5,
-              ),
-            ),
-          ],
-        ),
+                fontSize: 14)),
       ),
-    );
+    ]);
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Player Row
+// KPI Tile
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _PlayerRow extends StatelessWidget {
-  const _PlayerRow({required this.player, required this.onTap});
-  final ClubPlayer player;
-  final VoidCallback onTap;
+/// A session or match, unified for the "upcoming" strip so both show up on
+/// the dashboard by date instead of matches being invisible there entirely.
+class _ScheduleItem {
+  const _ScheduleItem._(this.date, this.title, this.isMatch);
 
-  @override
-  Widget build(BuildContext context) {
-    final statusColor = _statusColor(player.status);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.05)),
-        ),
-        child: Row(
-          children: [
-            // Avatar
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.05),
-                border: Border.all(
-                  color: statusColor.withOpacity(0.40),
-                  width: 1.5,
-                ),
-              ),
-              child: Center(
-                child: Text(
-                  player.initials,
-                  style: TextStyle(
-                    color: statusColor,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    player.fullName,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    '${player.position}  ·  #${player.number}',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.35),
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    player.status.label,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 9.5,
-                    ),
-                  ),
-                ),
-                if (player.latestScore != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    '${player.latestScore!.toStringAsFixed(0)} pts',
-                    style: TextStyle(
-                      color: AppColors.gold.withOpacity(0.90),
-                      fontWeight: FontWeight.w800,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(width: 8),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: Colors.white.withOpacity(0.18),
-              size: 16,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  factory _ScheduleItem.session(TrainingSession s) =>
+      _ScheduleItem._(s.date, s.name, false);
 
-  Color _statusColor(PlayerStatus s) {
-    switch (s) {
-      case PlayerStatus.active:     return AppColors.success;
-      case PlayerStatus.injured:    return AppColors.destructive;
-      case PlayerStatus.recovering: return AppColors.warning;
-      case PlayerStatus.inactive:   return AppColors.muted;
-    }
-  }
-}
+  factory _ScheduleItem.match(MatchModel m) =>
+      _ScheduleItem._(m.matchDate, m.opponent, true);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Result Row — Latest Assessment
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ResultRow extends StatelessWidget {
-  const _ResultRow({required this.assessment});
-  final PlayerAssessment assessment;
-
-  @override
-  Widget build(BuildContext context) {
-    final score = assessment.overallScore;
-    final color = score >= 80
-        ? AppColors.success
-        : score >= 60
-            ? AppColors.warning
-            : AppColors.destructive;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(_typeIcon(), color: color, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  assessment.playerName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${_typeLabel()}  ·  ${_formatDate(assessment.date)}',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.35),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                score.toStringAsFixed(0),
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 18,
-                  height: 1,
-                ),
-              ),
-              Text(
-                'pts',
-                style: TextStyle(
-                  color: color.withOpacity(0.55),
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  IconData _typeIcon() {
-    switch (assessment.type) {
-      case AssessmentType.squat:
-        return Icons.airline_seat_legroom_extra_rounded;
-      case AssessmentType.singleLegBalance:
-        return Icons.accessibility_new_rounded;
-      case AssessmentType.jumpLanding:
-        return Icons.moving_rounded;
-      default:
-        return Icons.sports_score_rounded;
-    }
-  }
-
-  String _typeLabel() {
-    switch (assessment.type) {
-      case AssessmentType.squat:          return 'Squat';
-      case AssessmentType.singleLegBalance: return 'Balance';
-      case AssessmentType.jumpLanding:    return 'Jump Landing';
-      default:                            return 'Assessment';
-    }
-  }
-
-  String _formatDate(DateTime d) {
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${months[d.month - 1]} ${d.day}';
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shimmer Box — loading placeholder
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ShimmerBox extends StatefulWidget {
-  const _ShimmerBox({
-    required this.width,
-    required this.height,
-    this.radius = 12,
-  });
-  final double width;
-  final double height;
-  final double radius;
-
-  @override
-  State<_ShimmerBox> createState() => _ShimmerBoxState();
-}
-
-class _ShimmerBoxState extends State<_ShimmerBox>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    )..repeat(reverse: true);
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _anim,
-      builder: (_, __) => Container(
-        width: widget.width,
-        height: widget.height,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(widget.radius),
-          color: Color.lerp(
-            const Color(0xff14131E),
-            const Color(0xff1E1D2C),
-            _anim.value,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Club Settings Page
-// ─────────────────────────────────────────────────────────────────────────────
-
-class ClubSettingsPage extends StatefulWidget {
-  const ClubSettingsPage({super.key});
-
-  @override
-  State<ClubSettingsPage> createState() => _ClubSettingsPageState();
-}
-
-class _ClubSettingsPageState extends State<ClubSettingsPage> {
-  void _showLanguageSelector() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xff10101A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 20),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const Text(
-              'Select Language',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 17,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ...['English', 'العربية', 'Français'].map((lang) {
-              return GestureDetector(
-                onTap: () {
-                  final code = lang == 'English' ? 'en' : lang == 'العربية' ? 'ar' : 'fr';
-                  setAppLanguage(code);
-                  Navigator.pop(context);
-                },
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-                    decoration: BoxDecoration(
-                      color: AppColors.card,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.06)),
-                    ),
-                    child: Text(
-                      lang,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ClubShell(
-      currentIndex: 4,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 40),
-        children: [
-          const Text(
-            'Settings',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 24,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Preferences & account',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.35),
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 24),
-          _SettingsTile(
-            icon: Icons.language_rounded,
-            title: 'Language',
-            subtitle: 'Select app language',
-            accent: const Color(0xff7B68EE),
-            onTap: _showLanguageSelector,
-          ),
-          const SizedBox(height: 28),
-          GestureDetector(
-            onTap: () async {
-              await FirebaseService().signOut();
-              await OnboardingStore().clearSignedIn();
-              currentUserName = 'Player';
-              if (!mounted) return;
-              Navigator.of(context)
-                  .pushNamedAndRemoveUntil('/auth', (_) => false);
-            },
-            child: Container(
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                color: AppColors.destructive.withOpacity(0.07),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.destructive.withOpacity(0.20)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: AppColors.destructive.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.logout_rounded,
-                        color: AppColors.destructive, size: 18),
-                  ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'Sign Out',
-                    style: TextStyle(
-                      color: AppColors.destructive,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SettingsTile extends StatelessWidget {
-  const _SettingsTile({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.accent,
-    required this.onTap,
-  });
-  final IconData icon;
+  final DateTime date;
   final String title;
-  final String subtitle;
-  final Color accent;
-  final VoidCallback onTap;
+  final bool isMatch;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hero card meta chip
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _HeroMeta extends StatelessWidget {
+  const _HeroMeta({required this.icon, required this.label, this.clip = false});
+  final IconData icon;
+  final String label;
+  final bool clip;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.05)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: accent.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: accent, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
+    final content = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: AppColors.onDarkMuted, size: 11),
+        const SizedBox(width: 4),
+        clip
+            ? Flexible(
+                child: Text(label,
                     style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.35),
-                      fontSize: 11.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: Colors.white.withOpacity(0.20),
-              size: 18,
-            ),
-          ],
-        ),
-      ),
+                        color: AppColors.onDarkMuted,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w500),
+                    maxLines: 2))
+            : Text(label,
+                style: const TextStyle(
+                    color: AppColors.onDarkMuted,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w500)),
+      ],
     );
+    return clip ? Expanded(child: content) : content;
   }
 }

@@ -78,7 +78,7 @@ if (!isset($body['duration_minutes'])) jsonOut(['error' => 'duration_minutes is 
 $rpe      = (float)$body['rpe_score'];
 $duration = (int)$body['duration_minutes'];
 
-if ($rpe < 1 || $rpe > 10)          jsonOut(['error' => 'rpe_score must be 1–10'], 400);
+if ($rpe < 0 || $rpe > 10)          jsonOut(['error' => 'rpe_score must be 0–10'], 400);
 if ($duration < 1 || $duration > 480) jsonOut(['error' => 'duration_minutes must be 1–480'], 400);
 
 $notes       = isset($body['notes']) ? substr((string)$body['notes'], 0, 500) : null;
@@ -137,6 +137,56 @@ $load = $rpe * $effectiveDuration;
 // for the coach path, the roster ownership check above already verified it.
 $linkedPlayerId = $isCoach ? $coachTargetPlayerId : ($user['linked_player_id'] ?? null);
 $clubId         = $isCoach ? $ctx['club_id']      : ($user['club_user_id']     ?? null);
+
+// A player's post-session RPE is only valid after the linked training
+// session or match has ended. The UI mirrors this rule, but the API must also
+// enforce it for direct requests.
+if (!$isCoach && $sessionId && $rpeType === 'post') {
+    if (!$linkedPlayerId) {
+        $playerStmt = $pdo->prepare(
+            'SELECT id FROM club_players WHERE linked_user_id = ? AND is_active = 1
+             ORDER BY created_at DESC LIMIT 1'
+        );
+        $playerStmt->execute([$user['id']]);
+        $linkedPlayerId = $playerStmt->fetchColumn() ?: null;
+    }
+
+    $eventEnd = null;
+    if ($linkedPlayerId) {
+        $eventStmt = $pdo->prepare(
+            'SELECT date, start_time, duration_min FROM club_sessions
+             WHERE id = ? AND JSON_CONTAINS(player_ids, JSON_QUOTE(?)) LIMIT 1'
+        );
+        $eventStmt->execute([$sessionId, (string)$linkedPlayerId]);
+        $event = $eventStmt->fetch(PDO::FETCH_ASSOC);
+        if ($event) {
+            $eventStart = new DateTimeImmutable(
+                $event['date'] . ' ' . ($event['start_time'] ?: '00:00:00')
+            );
+            $eventEnd = $eventStart->modify('+' . (int)$event['duration_min'] . ' minutes');
+        } else {
+            $eventStmt = $pdo->prepare(
+                'SELECT match_date, match_time, player_minutes FROM matches
+                 WHERE id = ? AND JSON_CONTAINS(player_ids, JSON_QUOTE(?)) LIMIT 1'
+            );
+            $eventStmt->execute([$sessionId, (string)$linkedPlayerId]);
+            $event = $eventStmt->fetch(PDO::FETCH_ASSOC);
+            if ($event) {
+                $minutes = json_decode($event['player_minutes'] ?: '{}', true) ?: [];
+                $playedMinutes = (int)($minutes[(string)$linkedPlayerId] ?? 0);
+                if ($playedMinutes <= 0) jsonOut(['error' => 'rpe_not_participated'], 422);
+                $eventStart = new DateTimeImmutable(
+                    $event['match_date'] . ' ' . ($event['match_time'] ?: '00:00:00')
+                );
+                $eventEnd = $eventStart->modify('+105 minutes');
+            }
+        }
+    }
+
+    if ($eventEnd && new DateTimeImmutable('now') < $eventEnd) {
+        jsonOut(['error' => 'rpe_not_available'], 422);
+    }
+}
 
 $idempotencyKey = trim((string)(
     $_SERVER['HTTP_IDEMPOTENCY_KEY']

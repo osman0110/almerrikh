@@ -28,7 +28,7 @@ class PoseDetectionService {
       if (input == null) return null;
       final poses = await _detector.processImage(input);
       if (poses.isEmpty) {
-        return const PoseSnapshot(
+        return PoseSnapshot(
           bodyBox: null,
           center: null,
           leftWrist: null,
@@ -46,13 +46,14 @@ class PoseDetectionService {
           landmarkCount: 0,
           imageSize: Size.zero,
           rotation: 0,
-          landmarks: {},
+          landmarks: const {},
           tooClose: false,
           tooFar: false,
           lowLight: false,
+          timestampMs: frame.timestampMs,
         );
       }
-      return _snapshotFromPose(poses.first, frame.width, frame.height, frame.rotation, frame.isFront);
+      return _snapshotFromPose(poses.first, frame.width, frame.height, frame.rotation, frame.isFront, frame.timestampMs);
     } finally {
       _busy = false;
     }
@@ -101,6 +102,7 @@ class PoseDetectionService {
     int frameHeight,
     int rotation,
     bool isFront,
+    int timestampMs,
   ) {
     final landmarks = pose.landmarks;
     final visible = landmarks.values.where((l) => l.likelihood > 0.30).toList();
@@ -150,10 +152,11 @@ class PoseDetectionService {
         landmarkCount: 0,
         imageSize: screenImageSize,
         rotation: 0,
-        landmarks: {},
+        landmarks: const {},
         tooClose: false,
         tooFar: false,
         lowLight: false,
+        timestampMs: timestampMs,
       );
     }
 
@@ -204,11 +207,18 @@ class PoseDetectionService {
         visible.length;
     final guide = ExerciseEngine.guideFrame;
     final insideGuide = _insideRatio(normBox, guide) >= 0.60;
+    final tooClose = normBox.height > 0.85 || normBox.width > 0.75;
+    final tooFar   = normBox.height < 0.35;
+    // A body that's too far/close to measure reliably is never "fully
+    // visible" — otherwise a tiny, distant silhouette can still pass this
+    // check purely on landmark presence and feed garbage angles downstream.
     final full = headVisible &&
         shouldersVisible &&
         hipsVisible &&
         lowerBodyVisible &&
         insideGuide &&
+        !tooClose &&
+        !tooFar &&
         confidence >= 0.30;
 
     return PoseSnapshot(
@@ -234,9 +244,14 @@ class PoseDetectionService {
           if (entry.value.likelihood >= 0.25)
             entry.key.name: toScreen(entry.value.x, entry.value.y),
       },
-      tooClose: normBox.height > 0.85 || normBox.width > 0.75,
-      tooFar: normBox.height < 0.35,
+      tooClose: tooClose,
+      tooFar: tooFar,
       lowLight: false,
+      timestampMs: timestampMs,
+      likelihoods: {
+        for (final entry in landmarks.entries)
+          entry.key.name: entry.value.likelihood,
+      },
     );
   }
 
@@ -247,6 +262,13 @@ class PoseDetectionService {
     if (bodyArea <= 0) return 0;
     return (overlap.width * overlap.height) / bodyArea;
   }
+
+  // Diagnostic stubs — web engine exposes real values via JS interop.
+  static String  get engineName    => 'ML Kit';
+  static String  get engineStatus  => 'running';
+  static double  get engineFps     => 0.0;
+  static String? get lastError     => null;
+  static bool    get isModelReady  => true;
 
   Future<void> dispose() => _detector.close();
 }

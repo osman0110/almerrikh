@@ -7,6 +7,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once 'db.php';
 require_once 'includes/club_auth.php';
+require_once 'includes/notifications.php';
+require_once 'includes/discipline.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -51,6 +53,8 @@ function normalizeMatch(array &$r): void {
         ? json_decode($r['player_ids'], true) ?? [] : [];
     $r['player_minutes']  = $r['player_minutes'] && $r['player_minutes'] !== 'null'
         ? json_decode($r['player_minutes'], true) ?? [] : [];
+    $r['clock_running'] = (bool)($r['clock_running'] ?? false);
+    $r['elapsed_seconds'] = max(0, (int)($r['elapsed_seconds'] ?? 0));
 }
 
 $method = $_SERVER['REQUEST_METHOD'];
@@ -63,7 +67,17 @@ if ($method === 'GET') {
     $ctx = requireClubPermission($pdo, $user, 'sessions.read');
 
     if ($singleId) {
-        $stmt = $pdo->prepare('SELECT * FROM matches WHERE id = ? AND club_id = ?');
+        $stmt = $pdo->prepare(
+            'SELECT m.*, cc.name AS competition_name,
+                    CASE WHEN m.actual_started_at IS NULL THEN 0
+                         ELSE TIMESTAMPDIFF(SECOND, m.actual_started_at,
+                              COALESCE(m.actual_ended_at, UTC_TIMESTAMP())) END AS elapsed_seconds,
+                    (m.actual_started_at IS NOT NULL AND m.actual_ended_at IS NULL
+                     AND m.status = "active") AS clock_running
+             FROM matches m
+             LEFT JOIN club_competitions cc ON cc.id = m.competition_id
+             WHERE m.id = ? AND m.club_id = ?'
+        );
         $stmt->execute([$singleId, $ctx['club_id']]);
         $row = $stmt->fetch();
         if (!$row) jsonOut(['error' => 'Match not found'], 404);
@@ -93,7 +107,10 @@ if ($method === 'GET') {
         // Include per-player participation (starter/sub, minutes, position, goals/assists)
         $partStmt = $pdo->prepare(
             'SELECT id, match_id, player_id, starter, played, minute_in, minute_out,
-                    minutes_played, position, goals, assists, not_played_reason
+                    minutes_played, position, goals, assists, not_played_reason, rating, injured,
+                    timer_started_at IS NOT NULL AS clock_running,
+                    accumulated_seconds + CASE WHEN timer_started_at IS NULL THEN 0
+                        ELSE TIMESTAMPDIFF(SECOND, timer_started_at, UTC_TIMESTAMP()) END AS elapsed_seconds
              FROM match_participations WHERE match_id = ? ORDER BY starter DESC, minute_in ASC'
         );
         $partStmt->execute([$singleId]);
@@ -105,12 +122,20 @@ if ($method === 'GET') {
     $status = $_GET['status'] ?? null;
     $limit  = min((int)($_GET['limit'] ?? 50), 200);
 
-    $where  = ['club_id = ?'];
+    $where  = ['m.club_id = ?'];
     $params = [$ctx['club_id']];
-    if ($status) { $where[] = 'status = ?'; $params[] = $status; }
+    if ($status) { $where[] = 'm.status = ?'; $params[] = $status; }
 
-    $sql = 'SELECT * FROM matches WHERE ' . implode(' AND ', $where)
-         . ' ORDER BY match_date DESC, match_time DESC LIMIT ' . $limit;
+    $sql = 'SELECT m.*, cc.name AS competition_name,
+                   CASE WHEN m.actual_started_at IS NULL THEN 0
+                        ELSE TIMESTAMPDIFF(SECOND, m.actual_started_at,
+                             COALESCE(m.actual_ended_at, UTC_TIMESTAMP())) END AS elapsed_seconds,
+                   (m.actual_started_at IS NOT NULL AND m.actual_ended_at IS NULL
+                    AND m.status = "active") AS clock_running
+            FROM matches m
+            LEFT JOIN club_competitions cc ON cc.id = m.competition_id
+            WHERE ' . implode(' AND ', $where)
+         . ' ORDER BY m.match_date DESC, m.match_time DESC LIMIT ' . $limit;
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -128,33 +153,166 @@ if ($method === 'POST') {
     $body     = json_decode(file_get_contents('php://input'), true) ?? [];
     $action   = trim($body['action'] ?? '');
 
+    if (in_array($action, ['clock', 'starter', 'stat'], true)) {
+        $matchId = trim($body['match_id'] ?? '');
+        if (!$matchId) jsonOut(['error' => 'match_id is required'], 400);
+
+        $ownerStmt = $pdo->prepare('SELECT * FROM matches WHERE id = ?');
+        $ownerStmt->execute([$matchId]);
+        $match = $ownerStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$match) jsonOut(['error' => 'Match not found'], 404);
+
+        $ctx = requireClubPermission($pdo, $user, 'matches.live');
+        if ((int)$match['club_id'] !== (int)$ctx['club_id']) {
+            jsonOut(['error' => 'Forbidden'], 403);
+        }
+
+        $playerIds = $match['player_ids'] && $match['player_ids'] !== 'null'
+            ? json_decode($match['player_ids'], true) ?? [] : [];
+        $playerIds = array_map('strval', $playerIds);
+        $playerId = trim($body['player_id'] ?? '');
+        if ($playerId !== '' && !in_array($playerId, $playerIds, true)) {
+            jsonOut(['error' => 'Player is not assigned to this match'], 422);
+        }
+
+        $ensureParticipation = $pdo->prepare(
+            'INSERT IGNORE INTO match_participations
+                 (match_id, player_id, starter, played, minutes_played, goals, assists, created_by_user_id)
+             VALUES (?, ?, 0, 1, 0, 0, 0, ?)'
+        );
+
+        if ($action === 'starter') {
+            if ($match['actual_started_at'] !== null) {
+                jsonOut(['error' => 'Starting lineup cannot be changed after the match starts'], 409);
+            }
+            if (!$playerId) jsonOut(['error' => 'player_id is required'], 400);
+            $ensureParticipation->execute([$matchId, $playerId, (int)$user['id']]);
+            $pdo->prepare(
+                'UPDATE match_participations SET starter = ?, played = ?
+                 WHERE match_id = ? AND player_id = ?'
+            )->execute([(int)(bool)($body['starter'] ?? false), (int)(bool)($body['starter'] ?? false), $matchId, $playerId]);
+            jsonOut(['success' => true]);
+        }
+
+        if ($action === 'stat') {
+            if (!$playerId) jsonOut(['error' => 'player_id is required'], 400);
+            $stat = $body['stat'] ?? '';
+            if (!in_array($stat, ['goals', 'assists'], true)) {
+                jsonOut(['error' => 'Unsupported stat'], 422);
+            }
+            $ensureParticipation->execute([$matchId, $playerId, (int)$user['id']]);
+            $pdo->prepare("UPDATE match_participations SET {$stat} = {$stat} + 1 WHERE match_id = ? AND player_id = ?")
+                ->execute([$matchId, $playerId]);
+            jsonOut(['success' => true]);
+        }
+
+        $operation = trim($body['operation'] ?? '');
+        $pdo->beginTransaction();
+        try {
+            if ($operation === 'start_match') {
+                $starterCount = $pdo->prepare('SELECT COUNT(*) FROM match_participations WHERE match_id = ? AND starter = 1');
+                $starterCount->execute([$matchId]);
+                if ((int)$starterCount->fetchColumn() === 0) {
+                    $pdo->rollBack();
+                    jsonOut(['error' => 'Select the starting players first'], 422);
+                }
+                $pdo->prepare(
+                    "UPDATE matches SET actual_started_at = COALESCE(actual_started_at, UTC_TIMESTAMP()),
+                     actual_ended_at = NULL, status = 'active' WHERE id = ?"
+                )->execute([$matchId]);
+                $pdo->prepare(
+                    'UPDATE match_participations
+                     SET timer_started_at = COALESCE(timer_started_at, UTC_TIMESTAMP()),
+                         played = 1, minute_in = COALESCE(minute_in, 0)
+                     WHERE match_id = ? AND starter = 1'
+                )->execute([$matchId]);
+            } elseif ($operation === 'finish_match') {
+                $elapsedStmt = $pdo->prepare(
+                    'SELECT GREATEST(0, TIMESTAMPDIFF(SECOND, actual_started_at, UTC_TIMESTAMP()))
+                     FROM matches WHERE id = ?'
+                );
+                $elapsedStmt->execute([$matchId]);
+                $matchSeconds = (int)$elapsedStmt->fetchColumn();
+                $pdo->prepare(
+                    'UPDATE match_participations
+                     SET minutes_played = ROUND((accumulated_seconds + CASE WHEN timer_started_at IS NULL THEN 0
+                             ELSE GREATEST(0, TIMESTAMPDIFF(SECOND, timer_started_at, UTC_TIMESTAMP())) END) / 60),
+                         accumulated_seconds = accumulated_seconds + CASE WHEN timer_started_at IS NULL THEN 0
+                             ELSE GREATEST(0, TIMESTAMPDIFF(SECOND, timer_started_at, UTC_TIMESTAMP())) END,
+                         minute_out = CASE WHEN timer_started_at IS NULL THEN minute_out ELSE ? END,
+                         timer_started_at = NULL
+                     WHERE match_id = ?'
+                )->execute([(int)floor($matchSeconds / 60), $matchId]);
+                $pdo->prepare(
+                    "UPDATE matches SET actual_ended_at = UTC_TIMESTAMP(), status = 'completed' WHERE id = ?"
+                )->execute([$matchId]);
+            } elseif ($operation === 'start_player') {
+                if (!$playerId) jsonOut(['error' => 'player_id is required'], 400);
+                $ensureParticipation->execute([$matchId, $playerId, (int)$user['id']]);
+                $pdo->prepare(
+                    'UPDATE match_participations mp JOIN matches m ON m.id = mp.match_id
+                     SET mp.timer_started_at = COALESCE(mp.timer_started_at, UTC_TIMESTAMP()), mp.played = 1,
+                         mp.minute_in = COALESCE(mp.minute_in,
+                             FLOOR(TIMESTAMPDIFF(SECOND, m.actual_started_at, UTC_TIMESTAMP()) / 60))
+                     WHERE mp.match_id = ? AND mp.player_id = ? AND m.actual_started_at IS NOT NULL
+                           AND m.actual_ended_at IS NULL'
+                )->execute([$matchId, $playerId]);
+            } elseif ($operation === 'stop_player') {
+                if (!$playerId) jsonOut(['error' => 'player_id is required'], 400);
+                $pdo->prepare(
+                    'UPDATE match_participations mp JOIN matches m ON m.id = mp.match_id
+                     SET mp.minutes_played = ROUND((mp.accumulated_seconds +
+                             GREATEST(0, TIMESTAMPDIFF(SECOND, mp.timer_started_at, UTC_TIMESTAMP()))) / 60),
+                         mp.accumulated_seconds = mp.accumulated_seconds +
+                             GREATEST(0, TIMESTAMPDIFF(SECOND, mp.timer_started_at, UTC_TIMESTAMP())),
+                         mp.minute_out = FLOOR(TIMESTAMPDIFF(SECOND, m.actual_started_at, UTC_TIMESTAMP()) / 60),
+                         mp.timer_started_at = NULL
+                     WHERE mp.match_id = ? AND mp.player_id = ? AND mp.timer_started_at IS NOT NULL'
+                )->execute([$matchId, $playerId]);
+            } else {
+                $pdo->rollBack();
+                jsonOut(['error' => 'Unsupported clock operation'], 422);
+            }
+            $pdo->commit();
+            jsonOut(['success' => true]);
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            jsonOut(['error' => 'Unable to update match clock'], 500);
+        }
+    }
+
     // ── Cards: record yellow/red cards for a match (replaces the full set) ──────
     if ($action === 'cards') {
         $matchId = trim($body['match_id'] ?? '');
         if (!$matchId) jsonOut(['error' => 'match_id is required'], 400);
 
-        $ownerStmt = $pdo->prepare('SELECT club_id FROM matches WHERE id = ?');
+        $ownerStmt = $pdo->prepare('SELECT id, club_id, competition_id, match_date, status FROM matches WHERE id = ?');
         $ownerStmt->execute([$matchId]);
         $match = $ownerStmt->fetch();
         if (!$match) jsonOut(['error' => 'Match not found'], 404);
 
-        $ctx = requireClubPermission($pdo, $user, 'matches.update');
+        $ctx = requireClubPermission($pdo, $user, 'matches.live');
         if ((int)$match['club_id'] !== (int)$ctx['club_id']) jsonOut(['error' => 'Forbidden'], 403);
 
         $cards = $body['cards'] ?? [];
         if (!is_array($cards)) jsonOut(['error' => 'cards must be an array'], 422);
 
-        $pdo->prepare('DELETE FROM match_cards WHERE match_id = ?')->execute([$matchId]);
-
         $insert = $pdo->prepare(
             'INSERT INTO match_cards (match_id, player_id, card_type, minute, reason, created_by_user_id)
              VALUES (?, ?, ?, ?, ?, ?)'
         );
+        $newCardIds = [];
         foreach ($cards as $c) {
             if (!is_array($c)) continue;
             $playerId = trim($c['player_id'] ?? '');
             $cardType = in_array($c['card_type'] ?? '', ['yellow', 'red'], true) ? $c['card_type'] : null;
             if (!$playerId || !$cardType) continue;
+            $duplicate = $pdo->prepare(
+                'SELECT id FROM match_cards WHERE match_id = ? AND player_id = ? AND card_type = ?
+                 AND COALESCE(minute, -1) = COALESCE(?, -1) AND COALESCE(reason, "") = COALESCE(?, "") LIMIT 1'
+            );
+            $duplicate->execute([$matchId, $playerId, $cardType, $c['minute'] ?? null, $c['reason'] ?? null]);
+            if ($duplicate->fetchColumn()) continue;
             $insert->execute([
                 $matchId,
                 $playerId,
@@ -163,7 +321,11 @@ if ($method === 'POST') {
                 $c['reason'] ?? null,
                 (int)$user['id'],
             ]);
+            $newCardIds[] = (int)$pdo->lastInsertId();
         }
+
+        $match['_new_card_ids'] = $newCardIds;
+        disciplineProcessCards($pdo, $match, (int)$user['id']);
 
         jsonOut(['success' => true]);
     }
@@ -191,8 +353,9 @@ if ($method === 'POST') {
         $insert = $pdo->prepare(
             'INSERT INTO match_participations
                  (match_id, player_id, starter, played, minute_in, minute_out,
-                  minutes_played, position, goals, assists, not_played_reason, created_by_user_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                  minutes_played, position, goals, assists, not_played_reason, created_by_user_id,
+                  rating, injured)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($participations as $p) {
             if (!is_array($p)) continue;
@@ -211,6 +374,8 @@ if ($method === 'POST') {
                 (int)($p['assists'] ?? 0),
                 $p['not_played_reason'] ?? null,
                 (int)$user['id'],
+                isset($p['rating']) && $p['rating'] !== '' ? (float)$p['rating'] : null,
+                (int)(bool)($p['injured'] ?? false),
             ]);
         }
 
@@ -243,11 +408,31 @@ if ($method === 'POST') {
     $competitionId = isset($body['competition_id']) && $body['competition_id'] !== ''
         ? (int)$body['competition_id'] : null;
 
+    if (($body['status'] ?? 'scheduled') !== 'cancelled') {
+        try {
+            disciplineAssertPlayersEligible(
+                $pdo,
+                (int)$ctx['club_id'],
+                $competitionId,
+                is_array($playerIds) ? array_values(array_filter(array_map('strval', $playerIds))) : []
+            );
+        } catch (RuntimeException $e) {
+            jsonOut(['error' => $e->getMessage()], 422);
+        }
+    }
+
+    $stage      = $body['stage']       ?? null;
+    $roundLabel = $body['round_label'] ?? null;
+    $groupName  = $body['group_name']  ?? null;
+    $ourScore      = isset($body['our_score'])      && $body['our_score']      !== '' ? (int)$body['our_score']      : null;
+    $opponentScore = isset($body['opponent_score']) && $body['opponent_score'] !== '' ? (int)$body['opponent_score'] : null;
+
     $stmt = $pdo->prepare(
         'INSERT INTO matches
              (id, user_id, club_id, opponent, match_date, match_time, location, status,
-              player_ids, player_minutes, competition_id, wellness_required, rpe_required, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              player_ids, player_minutes, competition_id, wellness_required, rpe_required, notes,
+              stage, round_label, group_name, our_score, opponent_score)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
              club_id           = COALESCE(VALUES(club_id), club_id),
              opponent          = VALUES(opponent),
@@ -260,7 +445,12 @@ if ($method === 'POST') {
              competition_id    = VALUES(competition_id),
              wellness_required = VALUES(wellness_required),
              rpe_required      = VALUES(rpe_required),
-             notes             = VALUES(notes)'
+             notes             = VALUES(notes),
+             stage             = VALUES(stage),
+             round_label       = VALUES(round_label),
+             group_name        = VALUES(group_name),
+             our_score         = VALUES(our_score),
+             opponent_score    = VALUES(opponent_score)'
     );
 
     $stmt->execute([
@@ -278,7 +468,38 @@ if ($method === 'POST') {
         (int)(bool)($body['wellness_required'] ?? false),
         (int)(bool)($body['rpe_required']      ?? false),
         $body['notes'] ?? null,
+        $stage,
+        $roundLabel,
+        $groupName,
+        $ourScore,
+        $opponentScore,
     ]);
+
+    disciplineAdvanceForCompletedMatch($pdo, [
+        'id' => $id,
+        'club_id' => $ctx['club_id'],
+        'competition_id' => $competitionId,
+        'match_date' => $date,
+        'status' => $body['status'] ?? 'scheduled',
+    ]);
+
+    // Newly scheduled match — alert the selected players and the coaching
+    // staff. Updates to an existing match stay silent.
+    if (!$existing && is_array($playerIds) && $playerIds) {
+        $placeholders = implode(',', array_fill(0, count($playerIds), '?'));
+        $linkedStmt = $pdo->prepare(
+            "SELECT linked_user_id FROM club_players WHERE id IN ($placeholders) AND linked_user_id IS NOT NULL"
+        );
+        $linkedStmt->execute($playerIds);
+        $when = "$date " . ($body['match_time'] ?? $body['time'] ?? '');
+        foreach ($linkedStmt->fetchAll(PDO::FETCH_COLUMN) as $linkedUserId) {
+            createNotification(
+                $pdo, (int)$ctx['club_id'], (int)$linkedUserId, 'match_scheduled',
+                ['opponent' => $opponent, 'when' => $when], '/match/' . $id
+            );
+        }
+        notifyClubRole($pdo, (int)$ctx['club_id'], 'coach', 'match_scheduled_coach', ['opponent' => $opponent, 'when' => $when], ['linked_route' => '/match/' . $id]);
+    }
 
     jsonOut(['success' => true, 'id' => $id]);
 }

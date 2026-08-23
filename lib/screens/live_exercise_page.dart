@@ -4,9 +4,11 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../utils/app_logger.dart';
 import 'package:flutter/services.dart';
 
 import '../app_colors.dart';
+import '../app_localizations.dart';
 import '../data/mock_data.dart';
 import '../models/drill_result_model.dart';
 import '../services/camera_service.dart';
@@ -54,7 +56,7 @@ class ExerciseStateInfo {
 
 class ExerciseStateMachine {
   ExerciseStateInfo info(ExerciseScreenState state) {
-    const neonGreen = Color(0xff39ff14);
+    const neonGreen = Color(0xffD4FF3D);
     return switch (state) {
       ExerciseScreenState.initializingCamera => const ExerciseStateInfo(
           title: 'نجهز الكاميرا...',
@@ -432,7 +434,7 @@ class _CameraExerciseScreenState extends State<CameraExerciseScreen> {
           _leveledUp = sessionData['leveledUp'] == true;
         }
       } catch (e) {
-        debugPrint('Session result save error: $e');
+        AppLogger.e('LiveExercise', 'Session save failed', e);
       }
     }
 
@@ -626,29 +628,67 @@ class _CameraExerciseScreenState extends State<CameraExerciseScreen> {
   }
 
   Widget _safetyScreen() {
+    final exerciseType = _typeFor(drill.id);
+    final experimental = _isExperimental(exerciseType);
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: Center(
-        child: Padding(
+      body: SafeArea(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.health_and_safety_rounded, color: AppColors.warning, size: 50),
-              const SizedBox(height: 18),
-              const Text(
-                'Safety Warning',
-                style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900),
+              // Drill name + experimental badge
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      drill.name,
+                      style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  if (experimental) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.purple.withOpacity(0.5)),
+                      ),
+                      child: Text(
+                        AppLocalizations.get('experimental_label'),
+                        style: const TextStyle(color: Colors.purpleAccent, fontSize: 10, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
+                ],
               ),
+              if (experimental) ...[
+                const SizedBox(height: 6),
+                Text(
+                  AppLocalizations.get('experimental_description'),
+                  style: const TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+              ],
+              const SizedBox(height: 20),
+              // Safety
+              const Icon(Icons.health_and_safety_rounded, color: AppColors.warning, size: 40),
               const SizedBox(height: 10),
               Text(
-                'فضّي المساحة حولك، ثبت الموبايل بالعرض، وأوقف التمرين إذا شعرت بأي ألم أو دوخة.',
+                AppLocalizations.get('safety_screening_warning_title'),
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                AppLocalizations.get('safety_screening_warning_body'),
                 style: TextStyle(color: Colors.white.withOpacity(0.70), height: 1.45),
               ),
               const SizedBox(height: 24),
               PrimaryButton(
-                label: 'I Understand',
+                label: AppLocalizations.get('i_understand_btn'),
                 onTap: () => setState(() => _safetyAccepted = true),
               ),
             ],
@@ -680,7 +720,7 @@ class _PositioningOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const neonGreen = Color(0xff39ff14);
+    const neonGreen = Color(0xffD4FF3D);
     return SafeArea(
       child: Stack(
         children: [
@@ -867,7 +907,7 @@ class _TroubleCard extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: const Color(0xff39ff14), size: 14),
+        Icon(icon, color: const Color(0xffD4FF3D), size: 14),
         const SizedBox(width: 8),
         Text(
           text,
@@ -890,7 +930,7 @@ class _TrainingHud extends StatelessWidget {
     final progress = frame.totalTargets > 0
         ? (frame.reps / frame.totalTargets).clamp(0.0, 1.0)
         : 0.0;
-    const neon = Color(0xff39ff14);
+    const neon = Color(0xffD4FF3D);
 
     return SafeArea(
       child: Padding(
@@ -1178,7 +1218,7 @@ class PoseGuidePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final guide = _guideRect(size);
     final rrect = RRect.fromRectAndRadius(guide, const Radius.circular(20));
-    const neonGreen = Color(0xff39ff14);
+    const neonGreen = Color(0xffD4FF3D);
 
     final outside = Path()..addRect(Offset.zero & size);
     final inside = Path()..addRRect(rrect);
@@ -1243,7 +1283,7 @@ class PoseDebugPainter extends CustomPainter {
     });
 
     final skeletonPaint = Paint()
-      ..color = const Color(0xff39ff14)
+      ..color = const Color(0xffD4FF3D)
       ..strokeWidth = 1.5
       ..strokeCap = StrokeCap.round;
 
@@ -1265,7 +1305,7 @@ class PoseDebugPainter extends CustomPainter {
     line('rightShoulder', 'rightWrist');
 
     // Small dots
-    final dotPaint = Paint()..color = const Color(0xff39ff14);
+    final dotPaint = Paint()..color = const Color(0xffD4FF3D);
     final relevantPoints = [
       'leftShoulder', 'rightShoulder', 'leftHip', 'rightHip',
       'leftKnee', 'rightKnee', 'leftAnkle', 'rightAnkle',
@@ -1335,24 +1375,24 @@ class TargetPainter extends CustomPainter {
         center, radius * 1.45,
         Paint()
           ..style = PaintingStyle.fill
-          ..color = const Color(0xff39ff14).withOpacity(0.18)
+          ..color = const Color(0xffD4FF3D).withOpacity(0.18)
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
       );
       // Bright fill
       canvas.drawCircle(center, radius,
-          Paint()..style = PaintingStyle.fill..color = const Color(0xff39ff14).withOpacity(0.55));
+          Paint()..style = PaintingStyle.fill..color = const Color(0xffD4FF3D).withOpacity(0.55));
       // Bright stroke
       canvas.drawCircle(center, radius,
-          Paint()..style = PaintingStyle.stroke..strokeWidth = 4..color = const Color(0xff39ff14));
+          Paint()..style = PaintingStyle.stroke..strokeWidth = 4..color = const Color(0xffD4FF3D));
       // "+1" text floating above circle
       final tp = TextPainter(
         text: const TextSpan(
           text: '+1',
           style: TextStyle(
-            color: Color(0xff39ff14),
+            color: Color(0xffD4FF3D),
             fontSize: 30,
             fontWeight: FontWeight.w900,
-            shadows: [Shadow(color: Color(0xff39ff14), blurRadius: 8)],
+            shadows: [Shadow(color: Color(0xffD4FF3D), blurRadius: 8)],
           ),
         ),
         textDirection: TextDirection.ltr,
@@ -1389,7 +1429,7 @@ class TargetPainter extends CustomPainter {
           text: TextSpan(
             text: dbgText,
             style: TextStyle(
-              color: isHit ? const Color(0xff39ff14) : Colors.yellow,
+              color: isHit ? const Color(0xffD4FF3D) : Colors.yellow,
               fontSize: 11,
               fontWeight: FontWeight.bold,
               shadows: const [Shadow(color: Colors.black, blurRadius: 4)],
@@ -1498,6 +1538,21 @@ ExerciseType _typeFor(String id) {
     'power-shot'    => ExerciseType.powerShot,
     'finisher'      => ExerciseType.finisher,
     _               => ExerciseType.handReaction,
+  };
+}
+
+/// Exercises that are fun/warm-up only, not professional assessments.
+bool _isExperimental(ExerciseType type) {
+  return switch (type) {
+    ExerciseType.handReaction  => true,
+    ExerciseType.footReaction  => true,
+    ExerciseType.rainBody      => true,
+    ExerciseType.rainFeet      => true,
+    ExerciseType.powerShot     => true,
+    ExerciseType.finisher      => true,
+    ExerciseType.sprintCube    => true,
+    ExerciseType.getInTheBox   => true,
+    _ => false,
   };
 }
 

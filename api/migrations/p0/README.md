@@ -136,7 +136,17 @@ php api/tests/p0_acwr_calculator_test.php
 php api/tests/p0_body_composition_completeness_test.php
 php api/tests/p0_rpe_identity_test.php
 php api/tests/p0_training_load_quality_test.php
+php api/tests/p0_sessions_write_permission_test.php
+php api/tests/p0_rbac_capability_matrix_test.php
 ```
+
+`p0_rbac_capability_matrix_test.php` locks the club_auth.php capability
+matrix for the highest-sensitivity boundaries in the app: medical-detail
+read/write (must stay limited to doctor/physiotherapist/massage_specialist),
+the analyst role's read-only guarantee, the coach-only FMS/body-composition
+carve-out (which deliberately overrides owner/admin's normal wildcard), and
+player deletion. Extend this file rather than adding a new one when auditing
+another sensitive capability.
 
 Integration test:
 
@@ -144,10 +154,17 @@ Integration test:
 $env:APP_ENV = "test"
 $env:TEST_DB_NAME = "<isolated-test-db>"
 php api/tests/p0_scope_integration_test.php
+php api/tests/p0_attendance_scope_test.php
 ```
 
-The integration test refuses to run unless `APP_ENV=test` and
+The integration tests refuse to run unless `APP_ENV=test` and
 `TEST_DB_NAME` are both present.
+
+`p0_attendance_scope_test.php` is the RB2 regression test (attendance
+summary update was scoped by `user_id` instead of `club_id` — see the
+production readiness report). `p0_sessions_write_permission_test.php` is a
+pure (no DB) companion test covering the full `sessions.write` role matrix
+and can be run alongside the other pure tests below.
 
 ## Runtime schema transition
 

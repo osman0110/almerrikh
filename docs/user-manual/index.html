@@ -1,0 +1,1138 @@
+<title>دليل استخدام منصة المريخ</title>
+<style>
+  @font-face {
+    font-family: 'system-stack';
+  }
+
+  :root {
+    --bg: #F6F2EC;
+    --surface: #FFFFFF;
+    --surface-2: #FBF8F3;
+    --border: #E4DBCC;
+    --text: #221A15;
+    --muted: #786C5E;
+    --accent: #A81E2C;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #F6E2E2;
+    --gold: #9C7A2E;
+    --gold-soft: #F1E7CC;
+    --focus: #1F5FBF;
+    --shadow: 0 1px 2px rgba(30,20,10,0.06), 0 8px 24px -12px rgba(30,20,10,0.18);
+    --radius: 14px;
+    --font-display: 800 1rem/1.2 'Segoe UI', 'Tahoma', 'Arial', system-ui, sans-serif;
+    --font-body: 400 1rem/1.65 'Segoe UI', 'Tahoma', 'Arial', system-ui, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14100E;
+      --surface: #1C1613;
+      --surface-2: #221A16;
+      --border: #362A22;
+      --text: #F2EAE0;
+      --muted: #A9998A;
+      --accent: #E5424F;
+      --accent-ink: #1A0B0C;
+      --accent-soft: #3A1B1D;
+      --gold: #D8B673;
+      --gold-soft: #34291A;
+      --focus: #7FB3FF;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 32px -14px rgba(0,0,0,0.6);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #14100E;
+    --surface: #1C1613;
+    --surface-2: #221A16;
+    --border: #362A22;
+    --text: #F2EAE0;
+    --muted: #A9998A;
+    --accent: #E5424F;
+    --accent-ink: #1A0B0C;
+    --accent-soft: #3A1B1D;
+    --gold: #D8B673;
+    --gold-soft: #34291A;
+    --focus: #7FB3FF;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 32px -14px rgba(0,0,0,0.6);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body { overflow-x: hidden; }
+
+  [dir="rtl"] body { font-family: 'Segoe UI', 'Tahoma', 'Arial', system-ui, sans-serif; }
+
+  :lang(en) h1, :lang(en) h2, :lang(en) h3, :lang(en) .eyebrow,
+  :lang(fr) h1, :lang(fr) h2, :lang(fr) h3, :lang(fr) .eyebrow {
+    letter-spacing: 0.01em;
+  }
+
+  h1, h2, h3 { font: var(--font-display); margin: 0; text-wrap: balance; color: var(--text); }
+
+  a { color: inherit; }
+
+  button { font-family: inherit; cursor: pointer; }
+
+  button:focus-visible, [tabindex]:focus-visible, a:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  /* ---------- Shell ---------- */
+
+  .shell {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  [dir="rtl"] .shell { flex-direction: row; }
+
+  .sidebar {
+    width: 272px;
+    flex: none;
+    background: var(--surface-2);
+    border-inline-end: 1px solid var(--border);
+    padding: 22px 16px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(155deg, var(--accent), #7A1019);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font: 800 15px/1 'Segoe UI', sans-serif;
+    flex: none;
+    box-shadow: var(--shadow);
+  }
+
+  .brand-text { display: flex; flex-direction: column; gap: 1px; }
+  .brand-title { font: 800 14px/1.3 'Segoe UI', sans-serif; }
+  .brand-sub { font-size: 11.5px; color: var(--muted); }
+
+  .lang-switch {
+    display: flex;
+    gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+  }
+
+  .lang-switch button {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 7px 4px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 700;
+    transition: background .15s, color .15s;
+  }
+
+  .lang-switch button.active {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .nav-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 4px 8px 0;
+  }
+
+  [dir="rtl"] .nav-label { letter-spacing: 0; }
+
+  .role-nav { display: flex; flex-direction: column; gap: 4px; }
+
+  .role-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: start;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 9px 10px;
+    color: var(--text);
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+
+  .role-btn:hover { background: var(--surface); }
+
+  .role-btn.active {
+    background: var(--surface);
+    border-color: var(--border);
+    box-shadow: var(--shadow);
+  }
+
+  .role-badge {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: 800 12px/1 'Segoe UI', sans-serif;
+    color: var(--accent-ink);
+    background: var(--accent);
+  }
+
+  .role-btn.active .role-badge { background: var(--gold); color: #1A140A; }
+
+  .role-name { flex: 1; }
+
+  .sidebar-foot {
+    margin-top: auto;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  /* ---------- Main ---------- */
+
+  .main {
+    flex: 1;
+    min-width: 0;
+    padding: 40px clamp(20px, 4vw, 56px) 80px;
+  }
+
+  .role-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 28px;
+  }
+
+  .role-header .role-badge { width: 52px; height: 52px; border-radius: 14px; font-size: 19px; }
+
+  .eyebrow {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+
+  .role-header h1 { font-size: clamp(22px, 2.6vw, 30px); }
+
+  .role-intro { color: var(--muted); font-size: 14.5px; max-width: 62ch; margin-top: 8px; }
+
+  .who-sees {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip {
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: var(--gold-soft);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .workflow-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .workflow-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .workflow-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+
+  .workflow-num {
+    font: 800 13px/1 'Segoe UI', sans-serif;
+    color: var(--accent);
+    flex: none;
+  }
+
+  .workflow-head h2 { font-size: 16px; }
+
+  .workflow-body { padding: 8px 20px 18px; }
+
+  ol.steps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+    display: flex;
+    flex-direction: column;
+  }
+
+  ol.steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px dashed var(--border);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  ol.steps li:first-child { border-top: none; }
+
+  ol.steps li::before {
+    content: counter(step);
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font: 800 11.5px/22px 'Segoe UI', sans-serif;
+    text-align: center;
+  }
+
+  .step-text b, .step-text strong { color: var(--text); }
+  .step-text .screen {
+    display: inline-block;
+    background: var(--gold-soft);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0 6px;
+    font-size: 12.5px;
+    font-weight: 700;
+  }
+
+  .note {
+    margin-top: 22px;
+    display: flex;
+    gap: 10px;
+    padding: 13px 16px;
+    border-radius: 10px;
+    background: var(--gold-soft);
+    border: 1px solid var(--border);
+    font-size: 13.5px;
+    color: var(--text);
+  }
+
+  .note b { color: var(--gold); }
+
+  /* ---------- Mobile ---------- */
+
+  .topbar { display: none; }
+
+  @media (max-width: 860px) {
+    .shell { flex-direction: column; }
+    .sidebar {
+      position: static;
+      width: 100%;
+      height: auto;
+      border-inline-end: none;
+      border-bottom: 1px solid var(--border);
+      padding: 14px 14px 10px;
+    }
+    .role-nav {
+      flex-direction: row;
+      overflow-x: auto;
+      gap: 8px;
+      padding-bottom: 4px;
+    }
+    .role-btn { flex: none; }
+    .sidebar-foot { display: none; }
+    .main { padding: 24px 18px 60px; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .lang-switch button, .role-btn { transition: background .15s ease, color .15s ease; }
+  }
+</style>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">AM</div>
+      <div class="brand-text">
+        <div class="brand-title" id="brandTitle">دليل الاستخدام</div>
+        <div class="brand-sub" id="brandSub">نادي المريخ</div>
+      </div>
+    </div>
+
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button data-lang="ar" class="active">العربية</button>
+      <button data-lang="en">English</button>
+      <button data-lang="fr">Français</button>
+    </div>
+
+    <div>
+      <div class="nav-label" id="navLabel">الأدوار</div>
+      <nav class="role-nav" id="roleNav"></nav>
+    </div>
+
+    <div class="sidebar-foot" id="sidebarFoot"></div>
+  </aside>
+
+  <main class="main" id="main"></main>
+</div>
+
+<script>
+(function () {
+  var UI = {
+    ar: { rolesLabel: "الأدوار", brandTitle: "دليل الاستخدام", brandSub: "نادي المريخ",
+      foot: "دليل تشغيلي يوضح خطوات كل دور داخل منصة المريخ لكرة القدم. اختر اللغة والدور من القائمة.",
+      whoSees: "ماذا يرى هذا الدور؟" },
+    en: { rolesLabel: "Roles", brandTitle: "User Guide", brandSub: "Al Merrikh SC",
+      foot: "An operating guide to every role's workflow inside the Al Merrikh platform. Pick a language and a role from the list.",
+      whoSees: "What this role sees" },
+    fr: { rolesLabel: "Rôles", brandTitle: "Guide d'utilisation", brandSub: "Al Merrikh SC",
+      foot: "Un guide opérationnel des tâches de chaque rôle sur la plateforme Al Merrikh. Choisissez une langue puis un rôle.",
+      whoSees: "Ce que voit ce rôle" }
+  };
+
+  var ROLES = [
+    {
+      id: "player",
+      initial: { ar: "لا", en: "PL", fr: "JO" },
+      name: { ar: "اللاعب", en: "Player", fr: "Joueur" },
+      eyebrow: { ar: "حساب لاعب", en: "Player account", fr: "Compte joueur" },
+      intro: {
+        ar: "لاعب مستقل أو منضم لنادٍ عبر كود دعوة. اللاعب المرتبط بنادٍ يرى تبويبي الجلسات والمباريات؛ اللاعب المستقل يرى بدلاً منهما خطة الذكاء الاصطناعي الخاصة به.",
+        en: "A player is either independent or linked to a club via an invite code. A club-linked player sees Sessions and Matches tabs; an independent player instead sees their own AI training plan.",
+        fr: "Le joueur est indépendant ou rattaché à un club via un code d'invitation. Un joueur de club voit les onglets Séances et Matchs ; un joueur indépendant voit à la place son plan d'entraînement IA."
+      },
+      sees: {
+        ar: ["الرئيسية", "الجلسات", "المباريات", "المراقبة اليومية", "التقارير", "الملف الشخصي"],
+        en: ["Home", "Sessions", "Matches", "Daily Monitoring", "Reports", "Profile"],
+        fr: ["Accueil", "Séances", "Matchs", "Suivi quotidien", "Rapports", "Profil"]
+      },
+      workflows: [
+        {
+          title: { ar: "الانضمام إلى نادٍ (للاعب المستقل)", en: "Join a club (independent player)", fr: "Rejoindre un club (joueur indépendant)" },
+          steps: {
+            ar: [
+              "من الشاشة الرئيسية افتح <b>الانضمام لنادٍ</b> من قائمة الملف الشخصي.",
+              "أدخل <b>كود الدعوة</b> الذي أرسله لك النادي (يُصدره الأدمن من إدارة الموظفين).",
+              "تأكد من اسم النادي الظاهر ثم اضغط <b>تأكيد الانضمام</b>.",
+              "بعد الموافقة، يتحول حسابك تلقائيًا من «مستقل» إلى «لاعب نادٍ» وتظهر تبويبات الجلسات والمباريات."
+            ],
+            en: [
+              "From the home screen open <b>Join Club</b> in the profile menu.",
+              "Enter the <b>invite code</b> the club sent you (generated by the club admin from Staff Management).",
+              "Confirm the club name shown, then tap <b>Confirm Join</b>.",
+              "Once approved, your account switches from Independent to Club Player and the Sessions and Matches tabs appear."
+            ],
+            fr: [
+              "Depuis l'accueil, ouvrez <b>Rejoindre un club</b> dans le menu du profil.",
+              "Saisissez le <b>code d'invitation</b> envoyé par le club (généré par l'admin dans la gestion du personnel).",
+              "Vérifiez le nom du club affiché puis appuyez sur <b>Confirmer</b>.",
+              "Une fois validé, votre compte passe d'Indépendant à Joueur de club et les onglets Séances et Matchs apparaissent."
+            ]
+          }
+        },
+        {
+          title: { ar: "إكمال جلسة تدريب من البداية للنهاية", en: "Completing a training session end-to-end", fr: "Compléter une séance d'entraînement de bout en bout" },
+          steps: {
+            ar: [
+              "عند بدء الجلسة المجدولة تفتح تلقائيًا شاشة <span class='screen'>استبيان ما قبل التدريب</span> — أجب عن أسئلة النوم، التعب، ألم العضلات، والمزاج.",
+              "اضغط <b>بدء الجلسة</b> للدخول إلى شاشة <span class='screen'>تشغيل الجلسة</span> التي تعرض التمارين المجدولة لك.",
+              "بعد انتهاء التدريب على أرض الملعب، افتح شاشة <span class='screen'>تقييم ما بعد التدريب</span> وسجّل معدل الجهد المُدرك (RPE) وأي ملاحظات إصابة.",
+              "ستظهر <span class='screen'>ملخص الجلسة</span> تلقائيًا بحالتك (مكتملة/جزئية) — لا حاجة لأي حفظ إضافي."
+            ],
+            en: [
+              "When your scheduled session starts, the <span class='screen'>Pre-Training Wellness</span> screen opens automatically — answer questions on sleep, fatigue, muscle soreness and mood.",
+              "Tap <b>Start Session</b> to enter the <span class='screen'>Session Runner</span>, which shows the drills scheduled for you.",
+              "After training on the pitch, open <span class='screen'>Post-Training Feedback</span> and log your perceived exertion (RPE) and any injury notes.",
+              "The <span class='screen'>Session Summary</span> appears automatically with your status (completed/partial) — no extra save step is needed."
+            ],
+            fr: [
+              "Au démarrage de votre séance programmée, l'écran <span class='screen'>Questionnaire pré-entraînement</span> s'ouvre automatiquement — répondez sur le sommeil, la fatigue, les courbatures et l'humeur.",
+              "Appuyez sur <b>Démarrer la séance</b> pour accéder à l'écran <span class='screen'>Exécution de la séance</span>, qui affiche vos exercices programmés.",
+              "Après l'entraînement sur le terrain, ouvrez <span class='screen'>Retour post-entraînement</span> et indiquez votre effort perçu (RPE) et toute douleur.",
+              "Le <span class='screen'>Résumé de séance</span> s'affiche automatiquement avec votre statut (complète/partielle) — aucune sauvegarde supplémentaire n'est nécessaire."
+            ]
+          }
+        },
+        {
+          title: { ar: "تسجيل مؤشر Hooper و RPE اليومي", en: "Logging the daily Hooper Index and RPE", fr: "Enregistrer l'indice Hooper et le RPE quotidien" },
+          steps: {
+            ar: [
+              "افتح تبويب <span class='screen'>المراقبة اليومية</span> من الشاشة الرئيسية.",
+              "اختر <b>مؤشر Hooper</b> وسجّل تقييمك لجودة النوم، التوتر، التعب، وألم العضلات على مقياس 1-7.",
+              "اختر <b>RPE</b> وسجّل شدة الجهد المبذول في آخر جلسة إن لم يكن قد سُجّل من شاشة ما بعد التدريب.",
+              "اضغط <b>حفظ</b> — تظهر نتيجتك فورًا في مخطط الاتجاه أعلى الشاشة."
+            ],
+            en: [
+              "Open the <span class='screen'>Daily Monitoring</span> tab from the home screen.",
+              "Select <b>Hooper Index</b> and rate your sleep quality, stress, fatigue, and muscle soreness on a 1-7 scale.",
+              "Select <b>RPE</b> and log the effort intensity of your last session if it wasn't already recorded from the post-training screen.",
+              "Tap <b>Save</b> — your result appears immediately in the trend chart at the top of the screen."
+            ],
+            fr: [
+              "Ouvrez l'onglet <span class='screen'>Suivi quotidien</span> depuis l'accueil.",
+              "Sélectionnez <b>Indice Hooper</b> et évaluez sommeil, stress, fatigue et courbatures sur une échelle de 1 à 7.",
+              "Sélectionnez <b>RPE</b> et indiquez l'intensité de l'effort de votre dernière séance si elle n'a pas déjà été saisie depuis l'écran post-entraînement.",
+              "Appuyez sur <b>Enregistrer</b> — votre résultat apparaît aussitôt dans le graphique de tendance en haut de l'écran."
+            ]
+          }
+        },
+        {
+          title: { ar: "تسجيل تركيبة الجسم", en: "Recording body composition", fr: "Enregistrer la composition corporelle" },
+          steps: {
+            ar: [
+              "من <span class='screen'>المراقبة اليومية</span> اختر <b>تركيبة الجسم</b>.",
+              "أدخل الوزن، ونسبة الدهون والكتلة العضلية إن توفر لديك جهاز قياس.",
+              "اضغط <b>حفظ القياس</b> — يُضاف تاريخ اليوم تلقائيًا ويظهر في مخطط التقدم بشاشة <span class='screen'>التاريخ</span>."
+            ],
+            en: [
+              "From <span class='screen'>Daily Monitoring</span> select <b>Body Composition</b>.",
+              "Enter weight, and body-fat / muscle-mass percentage if you have a measuring device.",
+              "Tap <b>Save Measurement</b> — today's date is added automatically and it appears in the progress chart on the <span class='screen'>History</span> screen."
+            ],
+            fr: [
+              "Depuis <span class='screen'>Suivi quotidien</span>, sélectionnez <b>Composition corporelle</b>.",
+              "Saisissez le poids, ainsi que le pourcentage de masse grasse/musculaire si vous disposez d'un appareil de mesure.",
+              "Appuyez sur <b>Enregistrer la mesure</b> — la date du jour est ajoutée automatiquement et apparaît dans le graphique de progression de l'écran <span class='screen'>Historique</span>."
+            ]
+          }
+        },
+        {
+          title: { ar: "متابعة الخطة الذكية (لاعب مستقل)", en: "Following your AI plan (independent player)", fr: "Suivre le plan IA (joueur indépendant)" },
+          steps: {
+            ar: [
+              "افتح <span class='screen'>خطة الذكاء الاصطناعي</span> من الشاشة الرئيسية — متاحة فقط للاعب غير المرتبط بنادٍ.",
+              "راجع معاينة الخطة الأسبوعية المُقترحة بناءً على تقييماتك السابقة.",
+              "اضغط <b>اعتماد الخطة</b> لبدء اتباعها، أو <b>تحديث البيانات</b> إذا لم تكن الخطة دقيقة."
+            ],
+            en: [
+              "Open <span class='screen'>AI Plan</span> from the home screen — only available to players not linked to a club.",
+              "Review the suggested weekly plan preview, based on your past assessments.",
+              "Tap <b>Adopt Plan</b> to start following it, or <b>Update My Data</b> if the plan doesn't look accurate."
+            ],
+            fr: [
+              "Ouvrez <span class='screen'>Plan IA</span> depuis l'accueil — disponible uniquement pour les joueurs non rattachés à un club.",
+              "Consultez l'aperçu du plan hebdomadaire proposé, basé sur vos évaluations précédentes.",
+              "Appuyez sur <b>Adopter le plan</b> pour le suivre, ou sur <b>Mettre à jour mes données</b> si le plan semble inexact."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      id: "coach",
+      initial: { ar: "لي", en: "PC", fr: "PR" },
+      name: { ar: "مدرب اللياقة", en: "Physical Coach", fr: "Préparateur physique" },
+      eyebrow: { ar: "حساب مدرب لياقة", en: "Physical coach account", fr: "Compte préparateur" },
+      intro: {
+        ar: "المسؤول التشغيلي الرئيسي عن اللاعبين والجلسات والتقييمات البدنية. يملك صلاحية إنشاء الجلسات وتشغيل تقييمات الذكاء الاصطناعي وفحوصات FMS، وهو من يتخذ قرار الجاهزية اليومية للاعبين.",
+        en: "The main operational owner of players, sessions, and physical assessments. Has permission to create sessions, run AI assessments and FMS screenings, and sets the daily readiness decision for players.",
+        fr: "Le responsable opérationnel principal des joueurs, des séances et des évaluations physiques. Peut créer des séances, lancer des évaluations IA et des dépistages FMS, et fixe la décision de disponibilité quotidienne des joueurs."
+      },
+      sees: {
+        ar: ["لوحة التحكم", "اللاعبون", "الجلسات", "المباريات", "التقييم البدني", "التقارير", "التنبيهات"],
+        en: ["Dashboard", "Players", "Sessions", "Matches", "Assessment", "Reports", "Alerts"],
+        fr: ["Tableau de bord", "Joueurs", "Séances", "Matchs", "Évaluation", "Rapports", "Alertes"]
+      },
+      workflows: [
+        {
+          title: { ar: "إضافة لاعب جديد", en: "Adding a new player", fr: "Ajouter un nouveau joueur" },
+          steps: {
+            ar: [
+              "من <span class='screen'>اللاعبون</span> اضغط زر <b>إضافة لاعب +</b>.",
+              "أدخل البيانات الأساسية: الاسم، تاريخ الميلاد، المركز، الرقم، والفريق/الفئة العمرية.",
+              "أضف صورة اللاعب إن توفرت، ثم اضغط <b>حفظ</b>.",
+              "يظهر اللاعب فورًا في قائمة الفريق ويمكن فتح ملفه الشخصي لإضافة القياسات الأولية."
+            ],
+            en: [
+              "From <span class='screen'>Players</span> tap the <b>Add Player +</b> button.",
+              "Enter the basic details: name, date of birth, position, shirt number, and team/age group.",
+              "Add the player's photo if available, then tap <b>Save</b>.",
+              "The player appears immediately in the roster and their profile can be opened to add baseline measurements."
+            ],
+            fr: [
+              "Depuis <span class='screen'>Joueurs</span>, appuyez sur <b>Ajouter un joueur +</b>.",
+              "Saisissez les informations de base : nom, date de naissance, poste, numéro et équipe/catégorie d'âge.",
+              "Ajoutez la photo du joueur si disponible, puis appuyez sur <b>Enregistrer</b>.",
+              "Le joueur apparaît aussitôt dans l'effectif et son profil peut être ouvert pour ajouter les mesures de référence."
+            ]
+          }
+        },
+        {
+          title: { ar: "إنشاء جلسة تدريب جديدة", en: "Creating a new training session", fr: "Créer une nouvelle séance d'entraînement" },
+          steps: {
+            ar: [
+              "من <span class='screen'>الجلسات</span> اضغط <b>جلسة جديدة +</b>.",
+              "حدد اسم الجلسة، التاريخ والوقت، والفريق المستهدف.",
+              "اختر اللاعبين المشاركين من القائمة، أو اضغط <b>تحديد الكل</b>.",
+              "فعّل الاختبارات أو التمارين المطلوبة لهذه الجلسة وأضف أي ملاحظات للاعبين.",
+              "اضغط <b>نشر الجلسة</b> — تصل إشعارات فورية لكل لاعب مُدرج."
+            ],
+            en: [
+              "From <span class='screen'>Sessions</span> tap <b>New Session +</b>.",
+              "Set the session name, date and time, and target team.",
+              "Select the participating players from the list, or tap <b>Select All</b>.",
+              "Enable the drills or tests required for this session and add any notes for players.",
+              "Tap <b>Publish Session</b> — every listed player receives an instant notification."
+            ],
+            fr: [
+              "Depuis <span class='screen'>Séances</span>, appuyez sur <b>Nouvelle séance +</b>.",
+              "Définissez le nom, la date, l'heure et l'équipe ciblée.",
+              "Sélectionnez les joueurs participants dans la liste, ou appuyez sur <b>Tout sélectionner</b>.",
+              "Activez les exercices ou tests requis pour cette séance et ajoutez des notes pour les joueurs.",
+              "Appuyez sur <b>Publier la séance</b> — chaque joueur listé reçoit une notification immédiate."
+            ]
+          }
+        },
+        {
+          title: { ar: "تشغيل تقييم بدني بالذكاء الاصطناعي", en: "Running an AI physical assessment", fr: "Lancer une évaluation physique par IA" },
+          steps: {
+            ar: [
+              "افتح <span class='screen'>التقييم البدني</span> واختر نوع الاختبار: <b>القرفصاء</b>، <b>توازن الساق الواحدة</b>، أو <b>الهبوط من القفز</b>.",
+              "اختر اللاعب من قائمة <span class='screen'>اختيار اللاعب</span>، أو أضف بياناته إن كانت أول مرة.",
+              "وجّه الكاميرا نحو اللاعب حسب الإرشادات الظاهرة على الشاشة والتزم بمسافة وإضاءة جيدة لضمان ثقة رصد جيدة.",
+              "اضغط <b>بدء التسجيل</b> ودع اللاعب يؤدي الحركة كاملة، ثم <b>إيقاف التسجيل</b>.",
+              "تُحسب النتيجة تلقائيًا من الزوايا والاستقرار والتماثل بين الجانبين، وتظهر في شاشة <span class='screen'>نتيجة التقييم</span> مع تفاصيل كل مقياس.",
+              "اضغط <b>حفظ إلى ملف اللاعب</b> لإضافتها إلى سجل تاريخه."
+            ],
+            en: [
+              "Open <span class='screen'>Assessment</span> and choose the test type: <b>Squat</b>, <b>Single Leg Balance</b>, or <b>Jump Landing</b>.",
+              "Pick the player from <span class='screen'>Player Selection</span>, or add their details if this is their first time.",
+              "Point the camera at the player following the on-screen guides, keeping good distance and lighting for reliable pose confidence.",
+              "Tap <b>Start Recording</b> and let the player perform the full movement, then <b>Stop Recording</b>.",
+              "The score is calculated automatically from joint angles, stability and left/right symmetry, and shown on the <span class='screen'>Assessment Result</span> screen with a breakdown per metric.",
+              "Tap <b>Save to Player File</b> to add it to their history."
+            ],
+            fr: [
+              "Ouvrez <span class='screen'>Évaluation</span> et choisissez le type de test : <b>Squat</b>, <b>Équilibre unipodal</b>, ou <b>Réception de saut</b>.",
+              "Choisissez le joueur dans <span class='screen'>Sélection du joueur</span>, ou ajoutez ses informations si c'est la première fois.",
+              "Orientez la caméra vers le joueur selon les repères affichés, en gardant une bonne distance et un bon éclairage pour une détection fiable.",
+              "Appuyez sur <b>Démarrer l'enregistrement</b> et laissez le joueur exécuter le mouvement complet, puis <b>Arrêter l'enregistrement</b>.",
+              "Le score est calculé automatiquement à partir des angles, de la stabilité et de la symétrie gauche/droite, et affiché sur l'écran <span class='screen'>Résultat de l'évaluation</span> avec le détail par indicateur.",
+              "Appuyez sur <b>Enregistrer dans le dossier du joueur</b> pour l'ajouter à son historique."
+            ]
+          }
+        },
+        {
+          title: { ar: "إجراء فحص FMS", en: "Running an FMS screening", fr: "Réaliser un dépistage FMS" },
+          steps: {
+            ar: [
+              "من ملف اللاعب افتح <span class='screen'>فحص FMS</span> ثم <b>فحص جديد</b>.",
+              "سجّل درجة كل حركة من الحركات السبع أثناء أدائها أمامك مباشرة.",
+              "اضغط <b>حفظ الفحص</b> — يمكنك مراجعة <span class='screen'>سجل الفحوصات</span> لمقارنة النتائج بمرور الوقت."
+            ],
+            en: [
+              "From the player's profile open <span class='screen'>FMS Screening</span> then <b>New Screening</b>.",
+              "Score each of the seven movements as the player performs them in front of you.",
+              "Tap <b>Save Screening</b> — you can review <span class='screen'>Screening History</span> to compare results over time."
+            ],
+            fr: [
+              "Depuis le profil du joueur, ouvrez <span class='screen'>Dépistage FMS</span> puis <b>Nouveau dépistage</b>.",
+              "Notez chacun des sept mouvements pendant qu'il les exécute devant vous.",
+              "Appuyez sur <b>Enregistrer le dépistage</b> — consultez l'<span class='screen'>historique</span> pour comparer les résultats dans le temps."
+            ]
+          }
+        },
+        {
+          title: { ar: "قرار الجاهزية اليومية", en: "Setting the daily readiness decision", fr: "Décision de disponibilité quotidienne" },
+          steps: {
+            ar: [
+              "افتح <span class='screen'>الجاهزية اليومية</span> — تعرض قائمة اللاعبين مع مؤشرات Hooper و RPE وحالة الإصابة المحدّثة من الطبيب.",
+              "لكل لاعب اختر الحالة: <b>جاهز بالكامل</b>، <b>تدريب معدّل</b>، أو <b>غير جاهز</b>، وحدد مدة المشاركة المسموحة إن لزم.",
+              "اضغط <b>اعتماد القرارات</b> — تنعكس الحالة فورًا في شاشات الجلسة لليوم."
+            ],
+            en: [
+              "Open <span class='screen'>Daily Readiness</span> — it lists players with their Hooper/RPE indicators and injury status updated by the doctor.",
+              "For each player pick a status: <b>Fully Available</b>, <b>Modified Training</b>, or <b>Unavailable</b>, and set an allowed participation duration if needed.",
+              "Tap <b>Confirm Decisions</b> — the status is reflected immediately in today's session screens."
+            ],
+            fr: [
+              "Ouvrez <span class='screen'>Disponibilité quotidienne</span> — la liste des joueurs affiche leurs indicateurs Hooper/RPE et le statut de blessure mis à jour par le médecin.",
+              "Pour chaque joueur, choisissez un statut : <b>Disponible</b>, <b>Entraînement modifié</b>, ou <b>Indisponible</b>, et fixez une durée de participation autorisée si nécessaire.",
+              "Appuyez sur <b>Confirmer les décisions</b> — le statut se répercute immédiatement sur les écrans de séance du jour."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      id: "doctor",
+      initial: { ar: "طب", en: "DR", fr: "MD" },
+      name: { ar: "الطبيب", en: "Doctor", fr: "Médecin" },
+      eyebrow: { ar: "حساب طبيب", en: "Doctor account", fr: "Compte médecin" },
+      intro: {
+        ar: "مسؤول عن ملفات الإصابة والملاحظات الطبية وجدولة العلاج الفيزيائي، ويشارك في قرار الجاهزية اليومية من الناحية الطبية.",
+        en: "Owns injury cases and medical notes, schedules physiotherapy sessions, and contributes the medical side of the daily readiness decision.",
+        fr: "Gère les dossiers de blessure et les notes médicales, planifie les séances de kinésithérapie, et participe au volet médical de la décision de disponibilité quotidienne."
+      },
+      sees: {
+        ar: ["لوحة الطبيب", "حالات الإصابة", "جلسات العلاج", "الجاهزية اليومية", "المهام"],
+        en: ["Doctor Dashboard", "Injury Cases", "Physio Sessions", "Daily Readiness", "Tasks"],
+        fr: ["Tableau de bord médecin", "Cas de blessure", "Séances de kiné", "Disponibilité quotidienne", "Tâches"]
+      },
+      workflows: [
+        {
+          title: { ar: "تسجيل حالة إصابة جديدة", en: "Registering a new injury case", fr: "Enregistrer un nouveau cas de blessure" },
+          steps: {
+            ar: [
+              "من <span class='screen'>حالات الإصابة</span> اضغط <b>حالة جديدة +</b> واختر اللاعب.",
+              "أدخل تاريخ الإصابة، موقعها في الجسم، نوعها، ودرجة الشدة.",
+              "اكتب التشخيص وأي فحوصات مرتبطة، وحدد حالة اللاعب: <b>متاح</b>، <b>محدود</b>، <b>غير متاح</b>، أو <b>في التأهيل</b>.",
+              "اضغط <b>حفظ الحالة</b> — يظهر تنبيه تلقائي لمدرب اللياقة بحالة اللاعب المحدثة."
+            ],
+            en: [
+              "From <span class='screen'>Injury Cases</span> tap <b>New Case +</b> and select the player.",
+              "Enter the injury date, body location, type, and severity.",
+              "Write the diagnosis and any related exams, and set the player status: <b>Available</b>, <b>Limited</b>, <b>Unavailable</b>, or <b>In Rehab</b>.",
+              "Tap <b>Save Case</b> — the physical coach receives an automatic alert of the updated status."
+            ],
+            fr: [
+              "Depuis <span class='screen'>Cas de blessure</span>, appuyez sur <b>Nouveau cas +</b> et sélectionnez le joueur.",
+              "Saisissez la date de la blessure, la zone du corps, le type et la gravité.",
+              "Renseignez le diagnostic et les examens associés, puis définissez le statut du joueur : <b>Disponible</b>, <b>Limité</b>, <b>Indisponible</b>, ou <b>En rééducation</b>.",
+              "Appuyez sur <b>Enregistrer le cas</b> — le préparateur physique reçoit une alerte automatique du statut mis à jour."
+            ]
+          }
+        },
+        {
+          title: { ar: "متابعة وتحديث حالة إصابة", en: "Following up and updating an injury case", fr: "Suivre et mettre à jour un cas de blessure" },
+          steps: {
+            ar: [
+              "افتح ملف الإصابة من <span class='screen'>حالات الإصابة</span>.",
+              "اضغط <b>تحديث جديد</b> وسجّل التقدم، أي تغيير في الحالة، والتاريخ المتوقع للعودة.",
+              "احفظ التحديث — يُضاف إلى السجل الزمني للحالة تلقائيًا دون حذف التحديثات السابقة."
+            ],
+            en: [
+              "Open the injury file from <span class='screen'>Injury Cases</span>.",
+              "Tap <b>New Update</b> and log the progress, any status change, and the expected return date.",
+              "Save the update — it's added to the case timeline automatically without overwriting earlier updates."
+            ],
+            fr: [
+              "Ouvrez le dossier de blessure depuis <span class='screen'>Cas de blessure</span>.",
+              "Appuyez sur <b>Nouvelle mise à jour</b> et notez la progression, tout changement de statut et la date de retour prévue.",
+              "Enregistrez la mise à jour — elle s'ajoute automatiquement à la chronologie du cas sans écraser les précédentes."
+            ]
+          }
+        },
+        {
+          title: { ar: "جدولة جلسة علاج فيزيائي", en: "Scheduling a physiotherapy session", fr: "Planifier une séance de kinésithérapie" },
+          steps: {
+            ar: [
+              "من ملف اللاعب أو من <span class='screen'>جلسات العلاج</span> اضغط <b>حجز جلسة +</b>.",
+              "اختر التاريخ والوقت، ونوع الجلسة، واربطها بحالة الإصابة إن وجدت.",
+              "اضغط <b>تأكيد الحجز</b> — تظهر الجلسة في جدول المعالج الفيزيائي."
+            ],
+            en: [
+              "From the player's file or <span class='screen'>Physio Sessions</span> tap <b>Book Session +</b>.",
+              "Choose the date and time, the session type, and link it to the injury case if relevant.",
+              "Tap <b>Confirm Booking</b> — the session appears on the physiotherapist's schedule."
+            ],
+            fr: [
+              "Depuis le dossier du joueur ou <span class='screen'>Séances de kiné</span>, appuyez sur <b>Réserver une séance +</b>.",
+              "Choisissez la date, l'heure et le type de séance, et associez-la au cas de blessure le cas échéant.",
+              "Appuyez sur <b>Confirmer la réservation</b> — la séance apparaît dans le planning du kinésithérapeute."
+            ]
+          }
+        },
+        {
+          title: { ar: "المشاركة في قرار الجاهزية اليومية", en: "Contributing to the daily readiness decision", fr: "Participer à la décision de disponibilité quotidienne" },
+          steps: {
+            ar: [
+              "افتح <span class='screen'>الجاهزية اليومية</span> وراجع قائمة اللاعبين المصابين أو تحت المتابعة.",
+              "حدّث الحالة الطبية لكل لاعب (متاح / محدود / غير متاح) بناءً على أحدث فحص.",
+              "احفظ — تُدمج حالتك الطبية مع مدخلات مدرب اللياقة في القرار النهائي لليوم."
+            ],
+            en: [
+              "Open <span class='screen'>Daily Readiness</span> and review injured or monitored players.",
+              "Update each player's medical status (Available / Limited / Unavailable) based on the latest exam.",
+              "Save — your medical input merges with the physical coach's input into the day's final decision."
+            ],
+            fr: [
+              "Ouvrez <span class='screen'>Disponibilité quotidienne</span> et consultez les joueurs blessés ou suivis.",
+              "Mettez à jour le statut médical de chaque joueur (Disponible / Limité / Indisponible) selon le dernier examen.",
+              "Enregistrez — votre avis médical se combine à celui du préparateur physique dans la décision finale du jour."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      id: "physio",
+      initial: { ar: "عل", en: "PT", fr: "KN" },
+      name: { ar: "المعالج الفيزيائي", en: "Physiotherapist", fr: "Kinésithérapeute" },
+      eyebrow: { ar: "حساب معالج فيزيائي", en: "Physiotherapist account", fr: "Compte kinésithérapeute" },
+      intro: {
+        ar: "يدير جدول جلسات العلاج الفيزيائي والمساج الفردية والجماعية، ويطّلع على الملاحظات الطبية وحالات الإصابة المرتبطة بكل لاعب يعالجه.",
+        en: "Manages the schedule of individual and group physiotherapy/massage sessions, and can view medical notes and injury cases for the players they treat.",
+        fr: "Gère le planning des séances de kinésithérapie/massage individuelles et collectives, et consulte les notes médicales et cas de blessure des joueurs qu'il traite."
+      },
+      sees: {
+        ar: ["لوحة المعالج", "جلسات العلاج", "الملاحظات الطبية", "حالات الإصابة"],
+        en: ["Physio Dashboard", "Physio Sessions", "Medical Notes", "Injury Cases"],
+        fr: ["Tableau de bord kiné", "Séances de kiné", "Notes médicales", "Cas de blessure"]
+      },
+      workflows: [
+        {
+          title: { ar: "حجز جلسة علاج لفرد واحد", en: "Booking a session for one player", fr: "Réserver une séance pour un joueur" },
+          steps: {
+            ar: [
+              "من <span class='screen'>جلسات العلاج</span> اضغط <b>جلسة فردية +</b>.",
+              "اختر اللاعب، والتاريخ والوقت، ثم حدد نوع الجلسة (تأهيل، إطالة، مساج ما قبل/بعد المباراة).",
+              "اضغط <b>حفظ الجلسة</b> — تظهر في جدولك اليومي فورًا."
+            ],
+            en: [
+              "From <span class='screen'>Physio Sessions</span> tap <b>Individual Session +</b>.",
+              "Choose the player, date and time, then set the session type (rehab, stretching, pre/post-match massage).",
+              "Tap <b>Save Session</b> — it appears on your daily schedule right away."
+            ],
+            fr: [
+              "Depuis <span class='screen'>Séances de kiné</span>, appuyez sur <b>Séance individuelle +</b>.",
+              "Choisissez le joueur, la date et l'heure, puis le type de séance (rééducation, étirement, massage avant/après match).",
+              "Appuyez sur <b>Enregistrer la séance</b> — elle apparaît aussitôt dans votre planning du jour."
+            ]
+          }
+        },
+        {
+          title: { ar: "حجز جلسات جماعية دفعة واحدة", en: "Booking bulk sessions for a group", fr: "Réserver des séances collectives en une fois" },
+          steps: {
+            ar: [
+              "من <span class='screen'>جلسات العلاج</span> اضغط <b>حجز جماعي +</b>.",
+              "اختر عدة لاعبين معًا (مثلاً كل من لديه إصابة عضلية) والتاريخ والوقت المشترك.",
+              "اضغط <b>تأكيد الحجز الجماعي</b> — تُنشأ جلسة منفصلة لكل لاعب تلقائيًا بنفس التفاصيل."
+            ],
+            en: [
+              "From <span class='screen'>Physio Sessions</span> tap <b>Bulk Booking +</b>.",
+              "Select multiple players at once (for example, everyone with a muscle injury) and a shared date and time.",
+              "Tap <b>Confirm Bulk Booking</b> — a separate session is created automatically for each player with the same details."
+            ],
+            fr: [
+              "Depuis <span class='screen'>Séances de kiné</span>, appuyez sur <b>Réservation groupée +</b>.",
+              "Sélectionnez plusieurs joueurs à la fois (par exemple tous ceux ayant une blessure musculaire) avec une date et une heure communes.",
+              "Appuyez sur <b>Confirmer la réservation groupée</b> — une séance distincte est créée automatiquement pour chaque joueur avec les mêmes détails."
+            ]
+          }
+        },
+        {
+          title: { ar: "مراجعة حالة إصابة قبل الجلسة", en: "Reviewing an injury case before a session", fr: "Consulter un cas de blessure avant une séance" },
+          steps: {
+            ar: [
+              "افتح ملف اللاعب ثم <span class='screen'>حالات الإصابة</span> لقراءة التشخيص وأي موانع للعلاج.",
+              "دوّن ملاحظتك واستجابة اللاعب بعد الجلسة في نفس الملف.",
+              "إن استدعى الأمر، وصّها بـ<b>توصية</b>: راحة، تدريب معدّل، أو مراجعة الطبيب."
+            ],
+            en: [
+              "Open the player's file then <span class='screen'>Injury Cases</span> to read the diagnosis and any treatment contraindications.",
+              "Note your observation and the player's response after the session in the same file.",
+              "If needed, mark it with a <b>recommendation</b>: rest, modified training, or doctor follow-up."
+            ],
+            fr: [
+              "Ouvrez le dossier du joueur puis <span class='screen'>Cas de blessure</span> pour lire le diagnostic et les contre-indications éventuelles.",
+              "Notez votre observation et la réponse du joueur après la séance dans le même dossier.",
+              "Si nécessaire, ajoutez une <b>recommandation</b> : repos, entraînement modifié, ou suivi médical."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      id: "nutritionist",
+      initial: { ar: "تغ", en: "NU", fr: "NU" },
+      name: { ar: "أخصائي التغذية", en: "Nutritionist", fr: "Nutritionniste" },
+      eyebrow: { ar: "حساب أخصائي تغذية", en: "Nutritionist account", fr: "Compte nutritionniste" },
+      intro: {
+        ar: "يبحث عن أي لاعب في الفريق ويبني له خطة تغذية مخصصة. لا يملك صلاحية على التقارير أو إعدادات النادي.",
+        en: "Searches for any player on the roster and builds a personalized nutrition plan for them. Has no access to reports or club settings.",
+        fr: "Recherche n'importe quel joueur de l'effectif et lui construit un plan nutritionnel personnalisé. N'a pas accès aux rapports ni aux paramètres du club."
+      },
+      sees: {
+        ar: ["البحث عن لاعب", "خطط التغذية"],
+        en: ["Player Search", "Nutrition Plans"],
+        fr: ["Recherche joueur", "Plans nutritionnels"]
+      },
+      workflows: [
+        {
+          title: { ar: "إنشاء خطة تغذية للاعب", en: "Creating a nutrition plan for a player", fr: "Créer un plan nutritionnel pour un joueur" },
+          steps: {
+            ar: [
+              "من <span class='screen'>التغذية</span> ابحث عن اللاعب بالاسم أو الرقم.",
+              "افتح ملفه واضغط <b>خطة جديدة +</b>.",
+              "حدد الأهداف اليومية (سعرات، بروتين)، وأي ملاحظات حساسية أو قيود غذائية.",
+              "اضغط <b>حفظ الخطة</b> — تصبح متاحة للاعب من ملفه الشخصي."
+            ],
+            en: [
+              "From <span class='screen'>Nutrition</span> search for the player by name or number.",
+              "Open their file and tap <b>New Plan +</b>.",
+              "Set daily targets (calories, protein), plus any allergy or dietary restriction notes.",
+              "Tap <b>Save Plan</b> — it becomes visible to the player from their own profile."
+            ],
+            fr: [
+              "Depuis <span class='screen'>Nutrition</span>, recherchez le joueur par nom ou numéro.",
+              "Ouvrez son dossier et appuyez sur <b>Nouveau plan +</b>.",
+              "Définissez les objectifs quotidiens (calories, protéines) et toute note d'allergie ou de restriction alimentaire.",
+              "Appuyez sur <b>Enregistrer le plan</b> — il devient visible au joueur depuis son propre profil."
+            ]
+          }
+        },
+        {
+          title: { ar: "تعديل خطة قائمة", en: "Editing an existing plan", fr: "Modifier un plan existant" },
+          steps: {
+            ar: [
+              "افتح ملف اللاعب ثم الخطة الحالية.",
+              "عدّل الأهداف أو الملاحظات حسب أحدث قياسات تركيبة الجسم أو حمل التدريب.",
+              "اضغط <b>حفظ التعديلات</b> — تنعكس فورًا لدى اللاعب."
+            ],
+            en: [
+              "Open the player's file then their current plan.",
+              "Adjust targets or notes based on the latest body-composition measurements or training load.",
+              "Tap <b>Save Changes</b> — reflected immediately for the player."
+            ],
+            fr: [
+              "Ouvrez le dossier du joueur puis son plan actuel.",
+              "Ajustez les objectifs ou les notes selon les dernières mesures de composition corporelle ou la charge d'entraînement.",
+              "Appuyez sur <b>Enregistrer les modifications</b> — répercutées immédiatement pour le joueur."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      id: "admin",
+      initial: { ar: "أد", en: "AD", fr: "AD" },
+      name: { ar: "الأدمن / المالك", en: "Admin / Owner", fr: "Admin / Propriétaire" },
+      eyebrow: { ar: "حساب إداري", en: "Administrative account", fr: "Compte administratif" },
+      intro: {
+        ar: "يدير حسابات الموظفين وأدوارهم، وإعدادات النادي والفريق، ويطّلع على التقارير التنفيذية. سياسة النظام تجعله بصلاحية قراءة فقط على الجلسات والتقييمات وفحوصات FMS — لا ينشئها بنفسه، بل يشرف عليها.",
+        en: "Manages staff accounts and roles, club and team settings, and reviews executive reports. By policy, admin has read-only access to sessions, assessments, and FMS screenings — they oversee them rather than create them.",
+        fr: "Gère les comptes du personnel et leurs rôles, les paramètres du club et de l'équipe, et consulte les rapports de direction. Par principe, l'admin n'a qu'un accès en lecture aux séances, évaluations et dépistages FMS — il les supervise sans les créer."
+      },
+      sees: {
+        ar: ["لوحة النادي", "الموظفون", "الفريق", "الإعدادات", "التقارير التنفيذية"],
+        en: ["Club Dashboard", "Staff", "Team", "Settings", "Executive Reports"],
+        fr: ["Tableau de bord club", "Personnel", "Équipe", "Paramètres", "Rapports de direction"]
+      },
+      workflows: [
+        {
+          title: { ar: "دعوة موظف جديد وتحديد دوره", en: "Inviting a staff member and assigning a role", fr: "Inviter un membre du personnel et lui assigner un rôle" },
+          steps: {
+            ar: [
+              "من <span class='screen'>الموظفون</span> اضغط <b>دعوة موظف +</b>.",
+              "اختر الدور: مدرب لياقة، مدرب تكتيكي، مدير أداء، طبيب، معالج فيزيائي، أخصائي تغذية، محلل، أو أدمن.",
+              "اضغط <b>توليد كود دعوة</b> وأرسله للموظف عبر القناة المناسبة (لا تُنشأ حسابات مباشرة من هذه الشاشة).",
+              "بعد أن يستخدم الموظف الكود لإنشاء حسابه، يظهر اسمه في القائمة بحالة <b>نشط</b>."
+            ],
+            en: [
+              "From <span class='screen'>Staff</span> tap <b>Invite Staff +</b>.",
+              "Choose the role: physical coach, tactical coach, performance manager, doctor, physiotherapist, nutritionist, analyst, or admin.",
+              "Tap <b>Generate Invite Code</b> and send it to the staff member through the appropriate channel (accounts aren't created directly from this screen).",
+              "Once the staff member uses the code to create their account, their name appears in the list with an <b>Active</b> status."
+            ],
+            fr: [
+              "Depuis <span class='screen'>Personnel</span>, appuyez sur <b>Inviter un membre +</b>.",
+              "Choisissez le rôle : préparateur physique, entraîneur tactique, directeur de la performance, médecin, kinésithérapeute, nutritionniste, analyste ou admin.",
+              "Appuyez sur <b>Générer un code d'invitation</b> et transmettez-le au membre par le canal approprié (les comptes ne sont pas créés directement depuis cet écran).",
+              "Une fois que le membre utilise le code pour créer son compte, son nom apparaît dans la liste avec le statut <b>Actif</b>."
+            ]
+          }
+        },
+        {
+          title: { ar: "إدارة الفريق والتشكيلة", en: "Managing the team and standings", fr: "Gérer l'équipe et le classement" },
+          steps: {
+            ar: [
+              "افتح <span class='screen'>الفريق</span> لإضافة أو تعديل فئات عمرية وفرق فرعية.",
+              "من شاشة الترتيب حدّث <b>ترتيب الدوري</b> يدويًا بعد كل جولة مباريات.",
+              "احفظ التغييرات — تظهر فورًا للاعبين والمدربين."
+            ],
+            en: [
+              "Open <span class='screen'>Team</span> to add or edit age groups and sub-teams.",
+              "From the standings screen, update the <b>league standings</b> manually after each match round.",
+              "Save changes — they appear immediately for players and coaches."
+            ],
+            fr: [
+              "Ouvrez <span class='screen'>Équipe</span> pour ajouter ou modifier des catégories d'âge et sous-équipes.",
+              "Depuis l'écran de classement, mettez à jour le <b>classement du championnat</b> manuellement après chaque journée.",
+              "Enregistrez — les changements apparaissent aussitôt pour les joueurs et les entraîneurs."
+            ]
+          }
+        },
+        {
+          title: { ar: "إعدادات النادي", en: "Club settings", fr: "Paramètres du club" },
+          steps: {
+            ar: [
+              "افتح <span class='screen'>الإعدادات</span> لتعديل اسم النادي، الشعار، ولون الهوية.",
+              "اضغط <b>حفظ</b> — التغييرات تنعكس على كل الحسابات المرتبطة بالنادي فورًا."
+            ],
+            en: [
+              "Open <span class='screen'>Settings</span> to edit the club name, logo, and brand color.",
+              "Tap <b>Save</b> — changes are reflected across every account linked to the club immediately."
+            ],
+            fr: [
+              "Ouvrez <span class='screen'>Paramètres</span> pour modifier le nom du club, le logo et la couleur de la marque.",
+              "Appuyez sur <b>Enregistrer</b> — les modifications se répercutent immédiatement sur tous les comptes liés au club."
+            ]
+          }
+        },
+        {
+          title: { ar: "مراجعة التقارير التنفيذية", en: "Reviewing executive reports", fr: "Consulter les rapports de direction" },
+          steps: {
+            ar: [
+              "افتح <span class='screen'>التقارير التنفيذية</span> لعرض حالة الفريق الإجمالية: الجاهزية، الإصابات، والالتزام بالجلسات.",
+              "استخدم الفلاتر لعرض فترة أو فئة عمرية محددة.",
+              "صدّر أو شارك التقرير إن كانت الميزة متاحة في نسختك."
+            ],
+            en: [
+              "Open <span class='screen'>Executive Reports</span> to see the overall team status: readiness, injuries, and session compliance.",
+              "Use the filters to view a specific period or age group.",
+              "Export or share the report if that feature is available in your build."
+            ],
+            fr: [
+              "Ouvrez <span class='screen'>Rapports de direction</span> pour voir l'état global de l'équipe : disponibilité, blessures et assiduité aux séances.",
+              "Utilisez les filtres pour afficher une période ou une catégorie d'âge spécifique.",
+              "Exportez ou partagez le rapport si cette fonctionnalité est disponible dans votre version."
+            ]
+          }
+        }
+      ],
+      note: {
+        ar: "الأدمن لا ينشئ جلسات تدريب أو تقييمات بدنية أو فحوصات FMS بنفسه — هذه سياسة نظام متعمّدة تُبقي الإنشاء الفعلي بيد مدرب اللياقة، ويكتفي الأدمن بالإشراف والمراجعة.",
+        en: "Admin doesn't create training sessions, physical assessments, or FMS screenings directly — this is a deliberate system policy that keeps actual creation with the physical coach, while admin oversees and reviews.",
+        fr: "L'admin ne crée pas directement de séances d'entraînement, d'évaluations physiques ou de dépistages FMS — c'est une politique système délibérée qui laisse la création au préparateur physique, l'admin se limitant à la supervision."
+      }
+    }
+  ];
+
+  var state = { lang: "ar", role: "player" };
+
+  function dir(lang) { return lang === "ar" ? "rtl" : "ltr"; }
+
+  function render() {
+    var lang = state.lang;
+    document.documentElement.lang = lang;
+    document.documentElement.dir = dir(lang);
+
+    document.getElementById("brandTitle").textContent = UI[lang].brandTitle;
+    document.getElementById("brandSub").textContent = UI[lang].brandSub;
+    document.getElementById("navLabel").textContent = UI[lang].rolesLabel;
+    document.getElementById("sidebarFoot").textContent = UI[lang].foot;
+
+    document.querySelectorAll(".lang-switch button").forEach(function (btn) {
+      btn.classList.toggle("active", btn.getAttribute("data-lang") === lang);
+    });
+
+    var nav = document.getElementById("roleNav");
+    nav.innerHTML = "";
+    ROLES.forEach(function (role) {
+      var btn = document.createElement("button");
+      btn.className = "role-btn" + (role.id === state.role ? " active" : "");
+      btn.setAttribute("data-role", role.id);
+      btn.innerHTML =
+        '<span class="role-badge">' + role.initial[lang] + '</span>' +
+        '<span class="role-name">' + role.name[lang] + '</span>';
+      btn.addEventListener("click", function () {
+        state.role = role.id;
+        render();
+      });
+      nav.appendChild(btn);
+    });
+
+    var role = ROLES.find(function (r) { return r.id === state.role; }) || ROLES[0];
+    var main = document.getElementById("main");
+    main.innerHTML = "";
+
+    var header = document.createElement("div");
+    header.className = "role-header";
+    header.innerHTML =
+      '<span class="role-badge">' + role.initial[lang] + '</span>' +
+      '<div>' +
+        '<p class="eyebrow">' + role.eyebrow[lang] + '</p>' +
+        '<h1>' + role.name[lang] + '</h1>' +
+        '<p class="role-intro">' + role.intro[lang] + '</p>' +
+        '<div class="who-sees" aria-label="' + UI[lang].whoSees + '">' +
+          role.sees[lang].map(function (s) { return '<span class="chip">' + s + '</span>'; }).join("") +
+        '</div>' +
+      '</div>';
+    main.appendChild(header);
+
+    var grid = document.createElement("div");
+    grid.className = "workflow-grid";
+    role.workflows.forEach(function (wf, i) {
+      var card = document.createElement("div");
+      card.className = "workflow-card";
+      var stepsHtml = wf.steps[lang].map(function (s) {
+        return '<li><span class="step-text">' + s + '</span></li>';
+      }).join("");
+      card.innerHTML =
+        '<div class="workflow-head">' +
+          '<span class="workflow-num">' + String(i + 1).padStart(2, "0") + '</span>' +
+          '<h2>' + wf.title[lang] + '</h2>' +
+        '</div>' +
+        '<div class="workflow-body"><ol class="steps">' + stepsHtml + '</ol></div>';
+      grid.appendChild(card);
+    });
+    main.appendChild(grid);
+
+    if (role.note) {
+      var note = document.createElement("div");
+      note.className = "note";
+      note.innerHTML = '<span>' + role.note[lang] + '</span>';
+      main.appendChild(note);
+    }
+  }
+
+  document.querySelectorAll(".lang-switch button").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      state.lang = btn.getAttribute("data-lang");
+      render();
+    });
+  });
+
+  render();
+})();
+</script>

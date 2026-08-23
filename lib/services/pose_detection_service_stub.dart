@@ -54,5 +54,11 @@ class PoseDetectionService {
     );
   }
 
+  static String  get engineName    => 'Demo';
+  static String  get engineStatus  => 'running';
+  static double  get engineFps     => 0.0;
+  static String? get lastError     => null;
+  static bool    get isModelReady  => true;
+
   Future<void> dispose() async {}
 }

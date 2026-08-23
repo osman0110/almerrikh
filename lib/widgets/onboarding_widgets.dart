@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-const _neonGreen = Color(0xff39ff14);
+const _neonGreen = Color(0xFFF7B638); // Al Merrikh gold
 
 class OnboardingImageStage extends StatelessWidget {
   const OnboardingImageStage({

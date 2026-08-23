@@ -1,5 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 class PlayerProfile {
   PlayerProfile({
     required this.id,
@@ -30,24 +28,40 @@ class PlayerProfile {
   final DateTime? updatedAt;
 
   factory PlayerProfile.fromMap(String id, Map<String, dynamic> data) {
+    DateTime? _parseDate(dynamic v) {
+      if (v == null) return null;
+      if (v is DateTime) return v;
+      if (v is String && v.isNotEmpty) return DateTime.tryParse(v);
+      return null;
+    }
+
     return PlayerProfile(
       id: id,
       name: data['name'] as String? ?? 'Unnamed Player',
-      photoUrl: data['photoUrl'] as String?,
-      heightCm: data['heightCm'] is int ? data['heightCm'] as int : null,
-      weightKg: data['weightKg'] is int ? data['weightKg'] as int : null,
-      dominantFoot: data['dominantFoot'] as String?,
+      photoUrl: data['photoUrl'] as String? ?? data['photo_url'] as String?,
+      heightCm: data['heightCm'] is int
+          ? data['heightCm'] as int
+          : data['height_cm'] != null
+              ? int.tryParse(data['height_cm'].toString())
+              : null,
+      weightKg: data['weightKg'] is int
+          ? data['weightKg'] as int
+          : data['weight_kg'] != null
+              ? int.tryParse(data['weight_kg'].toString())
+              : null,
+      dominantFoot: data['dominantFoot'] as String? ?? data['dominant_foot'] as String?,
       position: data['position'] as String?,
-      team: data['team'] as String?,
+      team: data['team'] as String? ?? data['team_name'] as String?,
       category: data['category'] as String?,
-      injuryNotes: data['injuryNotes'] as String?,
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
-      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+      injuryNotes: data['injuryNotes'] as String? ?? data['injury_notes'] as String?,
+      createdAt: _parseDate(data['createdAt'] ?? data['created_at']),
+      updatedAt: _parseDate(data['updatedAt'] ?? data['updated_at']),
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
+      'id': id,
       'name': name,
       if (photoUrl != null) 'photoUrl': photoUrl,
       if (heightCm != null) 'heightCm': heightCm,
@@ -57,7 +71,34 @@ class PlayerProfile {
       if (team != null) 'team': team,
       if (category != null) 'category': category,
       if (injuryNotes != null) 'injuryNotes': injuryNotes,
-      'updatedAt': FieldValue.serverTimestamp(),
     };
+  }
+
+  PlayerProfile copyWith({
+    String? id,
+    String? name,
+    String? photoUrl,
+    int? heightCm,
+    int? weightKg,
+    String? dominantFoot,
+    String? position,
+    String? team,
+    String? category,
+    String? injuryNotes,
+  }) {
+    return PlayerProfile(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      photoUrl: photoUrl ?? this.photoUrl,
+      heightCm: heightCm ?? this.heightCm,
+      weightKg: weightKg ?? this.weightKg,
+      dominantFoot: dominantFoot ?? this.dominantFoot,
+      position: position ?? this.position,
+      team: team ?? this.team,
+      category: category ?? this.category,
+      injuryNotes: injuryNotes ?? this.injuryNotes,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+    );
   }
 }

@@ -1,40 +1,22 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
 import '../models/assessment_result_model.dart';
 import '../api_service.dart';
-import 'firebase_service.dart';
+import '../services/club_service.dart';
+import '../utils/app_logger.dart';
 
 class AssessmentStorageService {
   AssessmentStorageService._internal();
   static final AssessmentStorageService instance = AssessmentStorageService._internal();
 
-  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
-
-  String? _currentUserPath() {
-    if (!Firebase.apps.isNotEmpty) {
-      return null;
-    }
-    final uid = FirebaseService().uid;
-    if (uid == null) return null;
-    return 'users/$uid';
-  }
-
+  /// Saves the assessment to the server and marks the player as assessed in
+  /// the session (if sessionId is present). Awaits the API call so callers
+  /// can rely on the data being persisted before they refresh the UI.
   Future<void> saveAssessment(AssessmentResult result) async {
-    // 1. Save to Firebase (primary store)
-    final base = _currentUserPath();
-    if (base == null) {
-      debugPrint('Firebase disabled, skipping saveAssessment');
-    } else {
-      await _firestore
-          .collection('$base/players/${result.playerId}/assessments')
-          .doc(result.id.isEmpty ? null : result.id)
-          .set(result.toMap(), SetOptions(merge: true));
+    if (ApiService.token == null) {
+      AppLogger.w('AssessmentStorage', 'No token — skipping sync');
+      return;
     }
-
-    // 2. Sync to nextkick.me (fire-and-forget — does not block if offline)
-    if (ApiService.token != null) {
-      ApiService.saveAssessment(
+    try {
+      final r = await ApiService.saveAssessment(
         id: result.id,
         playerId: result.playerId,
         playerName: result.playerName,
@@ -49,41 +31,54 @@ class AssessmentStorageService {
         correctionTips: result.correctionTips,
         recommendedDrills: result.recommendedDrills,
         angleMetrics: result.angleMetrics,
+        sessionId: result.sessionId,
         coachNotes: result.coachNotes,
-      ).then((r) {
-        if (r.containsKey('error') && r['error'] != 'sync_failed') {
-          debugPrint('nextkick.me assessment sync: ${r['error']}');
-        }
-      }).catchError((_) {});
+        attemptGroupId: result.attemptGroupId,
+        attemptNumber: result.attemptNumber,
+        invalidReason: result.invalidReason,
+      );
+      if (r.containsKey('error')) {
+        AppLogger.w('AssessmentStorage', 'Save error: ${r['error']}');
+        return;
+      }
+      AppLogger.i('AssessmentStorage', 'Saved assessment ${result.id} for player ${result.playerId}');
+
+      // Mark player as assessed in their session so progress updates.
+      final sid = result.sessionId;
+      if (sid != null && sid.isNotEmpty) {
+        ClubService().markPlayerAssessed(sid, result.playerId).catchError((_) {});
+      }
+    } catch (e) {
+      AppLogger.e('AssessmentStorage', 'saveAssessment failed', e);
     }
   }
 
-  Stream<List<AssessmentResult>> streamAssessments(String playerId) {
-    if (!Firebase.apps.isNotEmpty) {
+  /// Fetches assessment history for the authenticated player.
+  /// Uses the dedicated player endpoint that enforces player_id from the server.
+  /// Returns empty if [linkedPlayerId] is null — never fetches unscoped data.
+  Stream<List<AssessmentResult>> streamAssessments(String? linkedPlayerId) {
+    if (linkedPlayerId == null || linkedPlayerId.isEmpty) {
+      AppLogger.w('AssessmentStorage', 'streamAssessments: no linked_player_id');
       return Stream.value([]);
     }
-    final base = _currentUserPath();
-    return _firestore
-        .collection('$base/players/$playerId/assessments')
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => AssessmentResult.fromMap(doc.id, doc.data()))
-          .toList();
-    });
+    return Stream.fromFuture(
+      ApiService.getPlayerAssessments(linkedPlayerId: linkedPlayerId).then((list) =>
+          list.map((m) => AssessmentResult.fromMap(m['id'] as String, m)).toList()),
+    );
   }
 
-  Future<AssessmentResult?> getLatestAssessment(String playerId) async {
-    final base = _currentUserPath();
-    if (base == null) return null;
-    final query = await _firestore
-        .collection('$base/players/$playerId/assessments')
-        .orderBy('createdAt', descending: true)
-        .limit(1)
-        .get();
-    if (query.docs.isEmpty) return null;
-    final doc = query.docs.first;
-    return AssessmentResult.fromMap(doc.id, doc.data());
+  /// Returns the latest assessment for this player.
+  /// REQUIRES a non-empty [linkedPlayerId].
+  /// Returns null (not an error) if player has no assessments yet.
+  /// Throws if [linkedPlayerId] is missing — caller must handle this.
+  Future<AssessmentResult?> getLatestAssessment(String? linkedPlayerId) async {
+    if (linkedPlayerId == null || linkedPlayerId.isEmpty) {
+      AppLogger.w('AssessmentStorage', 'getLatestAssessment: no linked_player_id');
+      return null;
+    }
+    final list = await ApiService.getPlayerAssessments(
+        linkedPlayerId: linkedPlayerId, limit: 1);
+    if (list.isEmpty) return null;
+    return AssessmentResult.fromMap(list.first['id'] as String, list.first);
   }
 }

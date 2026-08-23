@@ -162,10 +162,34 @@ try {
     // Wellness is optional — swallow the error
 }
 
+$discipline = [
+    'yellow_cards_total' => 0, 'current_yellow_cards' => 0,
+    'red_cards_total' => 0, 'suspensions_total' => 0,
+    'active_suspensions' => 0, 'executed_suspensions' => 0,
+    'status' => 'available',
+];
+$cardStmt = $pdo->prepare('SELECT card_type, COUNT(*) AS total FROM match_cards mc JOIN matches m ON m.id = mc.match_id WHERE m.club_id = ? AND mc.player_id = ? GROUP BY card_type');
+$cardStmt->execute([(int)$ctx['club_id'], $playerId]);
+foreach ($cardStmt->fetchAll() as $row) {
+    if ($row['card_type'] === 'yellow') $discipline['yellow_cards_total'] = (int)$row['total'];
+    if ($row['card_type'] === 'red') $discipline['red_cards_total'] = (int)$row['total'];
+}
+$cycleStmt = $pdo->prepare('SELECT COALESCE(SUM(current_yellow_cards), 0) FROM player_discipline_cycles WHERE club_id = ? AND player_id = ? AND completed_at IS NULL');
+$cycleStmt->execute([(int)$ctx['club_id'], $playerId]);
+$discipline['current_yellow_cards'] = (int)$cycleStmt->fetchColumn();
+$suspensionStmt = $pdo->prepare("SELECT COUNT(*) AS total, SUM(status = 'active') AS active, SUM(status = 'completed') AS completed FROM player_suspensions WHERE club_id = ? AND player_id = ?");
+$suspensionStmt->execute([(int)$ctx['club_id'], $playerId]);
+$suspensions = $suspensionStmt->fetch() ?: [];
+$discipline['suspensions_total'] = (int)($suspensions['total'] ?? 0);
+$discipline['active_suspensions'] = (int)($suspensions['active'] ?? 0);
+$discipline['executed_suspensions'] = (int)($suspensions['completed'] ?? 0);
+$discipline['status'] = $discipline['active_suspensions'] > 0 ? 'suspended' : ($discipline['current_yellow_cards'] > 0 ? 'available_warning' : 'available');
+
 jsonOut([
     'success'     => true,
     'player'      => $player,
     'assessments' => $assessments,
     'wellness'    => $wellness,
+    'discipline'  => $discipline,
     'load'        => null,
 ]);

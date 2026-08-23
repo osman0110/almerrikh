@@ -1,12 +1,13 @@
 <?php
 require_once dirname(__DIR__, 2) . '/db.php';
+require_once dirname(__DIR__, 2) . '/includes/club_auth.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Authorization, Content-Type');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') jsonError('Method not allowed', 405);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') jsonOut(['error' => 'Method not allowed'], 405);
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -43,6 +44,8 @@ $user = getAuthUser($pdo);
 if (!in_array($user['role'], ['club', 'coach', 'academy'], true)) {
     jsonOut(['error' => 'Forbidden — coach/club/academy only'], 403);
 }
+$ctx = requireClubPermission($pdo, $user, 'players.write');
+$clubId = (int)$ctx['club_id'];
 
 $body = json_decode(file_get_contents('php://input'), true) ?? [];
 
@@ -87,7 +90,7 @@ try {
         'INSERT INTO training_plans
          (id, plan_type, owner_type, club_id, coach_user_id, title, goal, status)
          VALUES (?, \'manual\', ?, ?, ?, ?, ?, \'published\')'
-    )->execute([$planId, $user['role'], $coachId, $coachId, $title, $objective]);
+    )->execute([$planId, $user['role'], $clubId, $coachId, $title, $objective]);
 
     // 2. training_session
     $pdo->prepare(
@@ -97,7 +100,7 @@ try {
           wellness_required, rpe_required)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, \'manual\', \'assigned\', ?, ?)'
     )->execute([
-        $sessionId, $planId, $coachId, $coachId, $title, $description,
+        $sessionId, $planId, $clubId, $coachId, $title, $description,
         $sessionDate, $durationMinutes, $objective,
         $wellnessRequired, $rpeRequired
     ]);
@@ -138,18 +141,18 @@ try {
     $assigned = 0;
     $skipped  = 0;
     $cpStmt = $pdo->prepare(
-        'SELECT linked_user_id FROM club_players WHERE id = ? AND user_id = ?'
+        'SELECT linked_user_id FROM club_players WHERE id = ? AND club_id = ? AND is_active = 1'
     );
     foreach ($playerIds as $pid) {
         $pid = (string)$pid;
-        $cpStmt->execute([$pid, $coachId]);
+        $cpStmt->execute([$pid, $clubId]);
         $cp = $cpStmt->fetch();
         if (!$cp || !$cp['linked_user_id']) { $skipped++; continue; }
         $pdo->prepare(
             'INSERT IGNORE INTO session_players
              (session_id, club_id, player_user_id, linked_player_id, status)
              VALUES (?, ?, ?, ?, \'assigned\')'
-        )->execute([$sessionId, $coachId, (int)$cp['linked_user_id'], $pid]);
+        )->execute([$sessionId, $clubId, (int)$cp['linked_user_id'], $pid]);
         $assigned++;
     }
 

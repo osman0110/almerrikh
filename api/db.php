@@ -73,8 +73,13 @@ function ensureSchema(PDO $pdo): void {
     ensureColumn($pdo, 'users', 'player_type',      'VARCHAR(20) NULL');
     ensureColumn($pdo, 'users', 'club_user_id',     'INT         NULL');
     ensureColumn($pdo, 'users', 'linked_player_id', 'VARCHAR(64) NULL');
+    ensureColumn($pdo, 'users', 'avatar_url',       'VARCHAR(500) NULL');
     ensureColumn($pdo, 'users', 'trial_started_at', 'DATETIME NULL');
     ensureColumn($pdo, 'users', 'trial_ends_at',    'DATETIME NULL');
+    // Preferred app language ('ar'|'en'|'fr') — synced from the Flutter app's
+    // local language setting so server-generated notifications/push text can
+    // be translated per-recipient instead of always shipping in one language.
+    ensureColumn($pdo, 'users', 'language',         "VARCHAR(5) NOT NULL DEFAULT 'ar'");
 
     // ── Account lifecycle columns — shared with the web admin panel's users
     //    table shape (installed via install_unified.sql there); ensured here
@@ -466,6 +471,9 @@ function ensureSchema(PDO $pdo): void {
     ensureColumn($pdo, 'club_players', 'linked_user_id', 'INT NULL');
     // ── club_players MVP fields ──────────────────────────────────────────────
     ensureColumn($pdo, 'club_players', 'number',         'VARCHAR(10) NULL');
+    ensureColumn($pdo, 'club_players', 'nickname',       'VARCHAR(255) NULL');
+    ensureColumn($pdo, 'club_players', 'name_ar',        'VARCHAR(255) NULL');
+    ensureColumn($pdo, 'club_players', 'name_en',        'VARCHAR(255) NULL');
     ensureColumn($pdo, 'club_players', 'date_of_birth',  'DATE NULL');
     ensureColumn($pdo, 'club_players', 'nationality',    'VARCHAR(80) NULL');
     ensureColumn($pdo, 'club_players', 'physical_notes', 'TEXT NULL');
@@ -543,6 +551,8 @@ function ensureSchema(PDO $pdo): void {
     // club_id from their creator's resolved club so nothing already saved
     // goes dark once queries switch to filtering by club_id.
     ensureColumn($pdo, 'club_sessions', 'club_id', 'INT NULL');
+    ensureColumn($pdo, 'club_sessions', 'actual_started_at', 'DATETIME NULL');
+    ensureColumn($pdo, 'club_sessions', 'actual_ended_at', 'DATETIME NULL');
     $pdo->exec("UPDATE club_sessions cs
         LEFT JOIN club_staff st ON st.user_id = cs.user_id AND st.status = 'active'
         LEFT JOIN users u ON u.id = cs.user_id
@@ -606,10 +616,13 @@ function ensureSchema(PDO $pdo): void {
     // ── Physiotherapy & Massage Scheduling (roadmap item 4) ──────────────────
     // Independent treatment-session log — doctor/physiotherapist/massage
     // specialist only. Coach-visible availability stays on club_players.
+    // physio_sessions is session-level (one row per booking, shared time/
+    // room/reason/therapist); per-player status/notes live in
+    // physio_session_players (see below) — mirrors club_sessions +
+    // session_attendance. session_name is an optional free-text title.
     $pdo->exec("CREATE TABLE IF NOT EXISTS physio_sessions (
         id                  INT AUTO_INCREMENT PRIMARY KEY,
         club_id             INT NOT NULL,
-        player_id           VARCHAR(64) NOT NULL,
         therapist_user_id   INT NOT NULL,
         scheduled_at        DATETIME NOT NULL,
         duration_minutes    INT NOT NULL DEFAULT 30,
@@ -619,17 +632,29 @@ function ensureSchema(PDO $pdo): void {
         treatment_type      VARCHAR(100) NULL,
         intensity           VARCHAR(10) NOT NULL DEFAULT 'moderate',
         contraindications   TEXT NULL,
-        specialist_notes    TEXT NULL,
-        player_response     TEXT NULL,
-        recommendation      VARCHAR(20) NULL,
-        status              VARCHAR(12) NOT NULL DEFAULT 'scheduled',
         created_by_user_id  INT NOT NULL,
+        session_name        VARCHAR(150) NULL,
         created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_physio_club (club_id),
-        INDEX idx_physio_player (player_id),
         INDEX idx_physio_therapist (therapist_user_id),
         INDEX idx_physio_scheduled (scheduled_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS physio_session_players (
+        id                  INT AUTO_INCREMENT PRIMARY KEY,
+        session_id          INT NOT NULL,
+        player_id           VARCHAR(64) NOT NULL,
+        status              VARCHAR(12) NOT NULL DEFAULT 'scheduled',
+        specialist_notes    TEXT NULL,
+        player_response     TEXT NULL,
+        recommendation      VARCHAR(20) NULL,
+        created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_physio_sp_session_player (session_id, player_id),
+        INDEX idx_physio_sp_player (player_id),
+        CONSTRAINT fk_physio_sp_session FOREIGN KEY (session_id)
+            REFERENCES physio_sessions(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
     // ── Nutrition, Hydration & Supplements (roadmap item 5) ───────────────────
@@ -742,6 +767,9 @@ function ensureSchema(PDO $pdo): void {
         INDEX idx_session_attendance_player (player_id),
         INDEX idx_session_attendance_user (user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    ensureColumn($pdo, 'session_attendance', 'timer_started_at', 'DATETIME NULL');
+    ensureColumn($pdo, 'session_attendance', 'timer_ended_at', 'DATETIME NULL');
+    ensureColumn($pdo, 'session_attendance', 'elapsed_seconds', 'INT NOT NULL DEFAULT 0');
 
     // ── Training Plans & Sessions — Phase 1 ────────────────────────────────────
 
@@ -903,6 +931,10 @@ function ensureSchema(PDO $pdo): void {
         INDEX idx_matches_user (user_id),
         INDEX idx_matches_date (user_id, match_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    ensureColumn($pdo, 'matches', 'actual_started_at', 'DATETIME NULL');
+    ensureColumn($pdo, 'matches', 'actual_ended_at', 'DATETIME NULL');
+    ensureColumn($pdo, 'match_participations', 'timer_started_at', 'DATETIME NULL');
+    ensureColumn($pdo, 'match_participations', 'accumulated_seconds', 'INT NOT NULL DEFAULT 0');
 
     // ── Coach Evaluations ──────────────────────────────────────────────────────
     $pdo->exec("CREATE TABLE IF NOT EXISTS coach_evaluations (
@@ -1021,6 +1053,49 @@ function ensureSchema(PDO $pdo): void {
     ensureIndex($pdo, 'matches', 'idx_matches_competition',
         'CREATE INDEX idx_matches_competition ON matches (competition_id)');
 
+    // Competition discipline rules and the durable card-cycle/suspension ledger.
+    foreach ([
+        'yellow_card_threshold' => 'INT NOT NULL DEFAULT 3',
+        'suspension_matches' => 'INT NOT NULL DEFAULT 1',
+        'reset_yellow_cycle' => 'TINYINT NOT NULL DEFAULT 1',
+        'carry_cards_between_stages' => 'TINYINT NOT NULL DEFAULT 1',
+        'carry_suspensions_forward' => 'TINYINT NOT NULL DEFAULT 0',
+        'direct_red_suspension_matches' => 'INT NOT NULL DEFAULT 2',
+        'two_yellows_suspension_matches' => 'INT NOT NULL DEFAULT 1',
+        'allow_admin_override' => 'TINYINT NOT NULL DEFAULT 1',
+    ] as $column => $definition) {
+        ensureColumn($pdo, 'club_competitions', $column, $definition);
+    }
+    $pdo->exec("CREATE TABLE IF NOT EXISTS player_discipline_cycles (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        club_id INT NOT NULL, player_id VARCHAR(64) NOT NULL,
+        competition_id INT NOT NULL, season_id BIGINT UNSIGNED NULL,
+        cycle_number INT NOT NULL DEFAULT 1, current_yellow_cards INT NOT NULL DEFAULT 0,
+        started_at DATE NOT NULL, completed_at DATE NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_discipline_cycle (player_id, competition_id, cycle_number),
+        INDEX idx_discipline_cycle_current (club_id, player_id, competition_id, completed_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS player_suspensions (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        club_id INT NOT NULL, player_id VARCHAR(64) NOT NULL,
+        competition_id INT NOT NULL, season_id BIGINT UNSIGNED NULL,
+        reason_type VARCHAR(40) NOT NULL, reason TEXT NULL, source_card_id INT NULL,
+        matches_total INT NOT NULL, matches_remaining INT NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'active', administrative_decision TEXT NULL,
+        decision_document VARCHAR(500) NULL, created_by_user_id INT NOT NULL,
+        executed_at DATE NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_suspensions_player (club_id, player_id, status),
+        INDEX idx_suspensions_competition (competition_id, status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS suspension_match_executions (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        suspension_id BIGINT UNSIGNED NOT NULL, match_id VARCHAR(64) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_suspension_match (suspension_id, match_id), INDEX idx_execution_match (match_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
     // ── player_notes: coach notes attached to a club player ──────────────────────
     $pdo->exec("CREATE TABLE IF NOT EXISTS player_notes (
         id           INT AUTO_INCREMENT PRIMARY KEY,
@@ -1030,6 +1105,27 @@ function ensureSchema(PDO $pdo): void {
         note_text    TEXT NOT NULL,
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_player_notes_player (player_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // ── club_standings: admin-entered league table rows per competition ──────────
+    // Read by everyone in the club (players + all staff roles); written by
+    // owner/admin/performance_manager only (mirrors club_competitions' write gate).
+    $pdo->exec("CREATE TABLE IF NOT EXISTS club_standings (
+        id            INT AUTO_INCREMENT PRIMARY KEY,
+        club_id       INT NOT NULL,
+        competition_id INT NOT NULL,
+        position      SMALLINT NOT NULL DEFAULT 0,
+        team_name     VARCHAR(255) NOT NULL,
+        played        SMALLINT NOT NULL DEFAULT 0,
+        won           SMALLINT NOT NULL DEFAULT 0,
+        drawn         SMALLINT NOT NULL DEFAULT 0,
+        lost          SMALLINT NOT NULL DEFAULT 0,
+        goals_for     SMALLINT NOT NULL DEFAULT 0,
+        goals_against SMALLINT NOT NULL DEFAULT 0,
+        points        SMALLINT NOT NULL DEFAULT 0,
+        is_own_team   TINYINT(1) NOT NULL DEFAULT 0,
+        updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_club_standings_competition (competition_id, position)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
     // ── app_settings: key-value store for runtime toggles ────────────────────────
@@ -1103,6 +1199,22 @@ function ensureSchema(PDO $pdo): void {
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_notifications_user (user_id, is_read),
         INDEX idx_notifications_club (club_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // ── Push notification device tokens ──────────────────────────────────────
+    // FCM registration tokens per user/device. A user can have multiple rows
+    // (multiple devices); token is unique so re-registering on a new account
+    // (shared device) simply reassigns user_id instead of creating a dupe.
+    $pdo->exec("CREATE TABLE IF NOT EXISTS device_tokens (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        user_id    INT NOT NULL,
+        club_id    INT NULL,
+        token      VARCHAR(255) NOT NULL,
+        platform   VARCHAR(10) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_device_token (token),
+        INDEX idx_device_tokens_user (user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
     // ── Player status change history (Phase 1 platform expansion) ───────────

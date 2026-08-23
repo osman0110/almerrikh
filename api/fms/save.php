@@ -52,7 +52,7 @@ $playerId = trim($body['player_id'] ?? '');
 if (!$playerId) jsonOut(['error' => 'player_id is required'], 400);
 
 // Ownership check — scoped to the caller's club, not just the owner account
-$ctx = requireClubPermission($pdo, $user, 'assessments.write');
+$ctx = requireClubPermission($pdo, $user, 'fms.write');
 $ownerStmt = $pdo->prepare('SELECT name FROM club_players WHERE id = ? AND club_id = ?');
 $ownerStmt->execute([$playerId, $ctx['club_id']]);
 $player = $ownerStmt->fetch(PDO::FETCH_ASSOC);

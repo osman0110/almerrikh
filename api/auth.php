@@ -19,6 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/includes/fitness/SchemaInspector.php';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -235,13 +236,18 @@ function getAuthUser(PDO $pdo): array {
     $token = bearerToken();
     if (!$token) jsonOut(['error' => 'Unauthorized'], 401);
 
+    // avatar_url may not exist yet on every deployed DB — select it only when present
+    // so login/auth don't hard-fail on environments pending that migration.
+    $hasAvatarUrl = SchemaInspector::hasColumn($pdo, 'users', 'avatar_url');
+    $avatarSelect = $hasAvatarUrl ? 'u.avatar_url,' : 'NULL AS avatar_url,';
+
     $stmt = $pdo->prepare(
         'SELECT u.id,
                 COALESCE(u.name, \'\')       AS name,
                 u.email,
                 COALESCE(u.phone, \'\')      AS phone,
                 COALESCE(u.role, \'player\') AS role,
-                u.player_type, u.linked_player_id, u.club_user_id,
+                u.player_type, u.linked_player_id, u.club_user_id, ' . $avatarSelect . '
                 u.trial_started_at, u.trial_ends_at
          FROM users u
          JOIN user_tokens t ON u.id = t.user_id
@@ -280,10 +286,16 @@ function buildUserResponse(array $u, ?PDO $pdo = null): array {
     // Staff/club context — populates the org_role field the Flutter app
     // already reads (lib/app_state.dart) but the backend never sent before.
     $orgRole = null;
+    $clubName = null;
     if ($pdo !== null && isset($u['id'])) {
         require_once __DIR__ . '/includes/club_auth.php';
         $ctx = resolveClubContext($pdo, ['id' => $u['id']]);
         $orgRole = $ctx['staff_role'];
+        if ($ctx['club_id'] && SchemaInspector::hasTable($pdo, 'clubs')) {
+            $stmt = $pdo->prepare('SELECT name FROM clubs WHERE id = ? LIMIT 1');
+            $stmt->execute([$ctx['club_id']]);
+            $clubName = $stmt->fetchColumn() ?: null;
+        }
     }
 
     return [
@@ -298,10 +310,12 @@ function buildUserResponse(array $u, ?PDO $pdo = null): array {
         'club_id'              => $clubUserId,
         'club_user_id'         => $clubUserId,
         'linked_player_id'     => $u['linked_player_id'] ?? null,
+        'avatar_url'           => $u['avatar_url']       ?? null,
         'trial_started_at'     => $u['trial_started_at'] ?? null,
         'trial_ends_at'        => $trialEnds,
         'trial_days_remaining' => $trialRemaining,
         'org_role'             => $orgRole,
+        'club_name'            => $clubName,
     ];
 }
 
@@ -534,6 +548,7 @@ switch ($action) {
                         player_type,
                         linked_player_id,
                         club_user_id,
+                        avatar_url,
                         trial_started_at,
                         trial_ends_at,
                         subscription_status,
@@ -603,6 +618,88 @@ switch ($action) {
     case 'me': {
         $user = getAuthUser($pdo);
         jsonOut(['success' => true, 'user' => buildUserResponse($user, $pdo)]);
+    }
+
+    case 'update_profile': {
+        $user = getAuthUser($pdo);
+        $name = trim((string)($body['name'] ?? $user['name']));
+        $phone = normalizePhone((string)($body['phone'] ?? $user['phone']));
+        $avatarUrl = trim((string)($body['avatar_url'] ?? $user['avatar_url'] ?? ''));
+
+        if ($name === '' || mb_strlen($name) > 100) {
+            jsonOut(['error' => 'Invalid name'], 400);
+        }
+        if ($avatarUrl !== '' && mb_strlen($avatarUrl) > 500) {
+            jsonOut(['error' => 'Invalid avatar URL'], 400);
+        }
+
+        try {
+            if (SchemaInspector::hasColumn($pdo, 'users', 'avatar_url')) {
+                $stmt = $pdo->prepare(
+                    'UPDATE users SET name = ?, phone = ?, avatar_url = ? WHERE id = ?'
+                );
+                $stmt->execute([
+                    $name,
+                    $phone !== '' ? $phone : null,
+                    $avatarUrl !== '' ? $avatarUrl : null,
+                    $user['id'],
+                ]);
+            } else {
+                $stmt = $pdo->prepare(
+                    'UPDATE users SET name = ?, phone = ? WHERE id = ?'
+                );
+                $stmt->execute([
+                    $name,
+                    $phone !== '' ? $phone : null,
+                    $user['id'],
+                ]);
+            }
+        } catch (PDOException $e) {
+            if ((string)$e->getCode() === '23000') {
+                jsonOut(['error' => 'Phone number is already in use'], 409);
+            }
+            throw $e;
+        }
+
+        $updated = getAuthUser($pdo);
+        jsonOut([
+            'success' => true,
+            'user' => buildUserResponse($updated, $pdo),
+        ]);
+    }
+
+    case 'update_language': {
+        $user = getAuthUser($pdo);
+        $language = trim((string)($body['language'] ?? ''));
+        if (!in_array($language, ['ar', 'en', 'fr'], true)) {
+            jsonOut(['error' => 'Invalid language'], 400);
+        }
+        $pdo->prepare('UPDATE users SET language = ? WHERE id = ?')->execute([$language, $user['id']]);
+        jsonOut(['success' => true]);
+    }
+
+    case 'change_password': {
+        $user = getAuthUser($pdo);
+        $currentPassword = (string)($body['current_password'] ?? '');
+        $newPassword = (string)($body['new_password'] ?? '');
+
+        if ($currentPassword === '' || strlen($newPassword) < 6 || strlen($newPassword) > 128) {
+            jsonOut(['error' => 'Invalid password'], 400);
+        }
+
+        $stmt = $pdo->prepare('SELECT password_hash FROM users WHERE id = ?');
+        $stmt->execute([$user['id']]);
+        $passwordHash = (string)($stmt->fetchColumn() ?: '');
+        if (!password_verify($currentPassword, $passwordHash)) {
+            jsonOut(['error' => 'Current password is incorrect'], 422);
+        }
+
+        $stmt = $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+        $stmt->execute([
+            password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 11]),
+            $user['id'],
+        ]);
+        jsonOut(['success' => true]);
     }
 
     // ── Logout ────────────────────────────────────────────────────────────────

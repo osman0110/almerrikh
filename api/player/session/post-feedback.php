@@ -1,5 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/db.php';
+require_once dirname(__DIR__, 2) . '/includes/notifications.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -46,7 +47,7 @@ $body = json_decode(file_get_contents('php://input'), true) ?? [];
 // Required
 if (!isset($body['post_rpe'])) jsonOut(['error' => 'post_rpe is required'], 400);
 $postRpe = (int)$body['post_rpe'];
-if ($postRpe < 1 || $postRpe > 10) jsonOut(['error' => 'post_rpe must be 1–10'], 400);
+if ($postRpe < 0 || $postRpe > 10) jsonOut(['error' => 'post_rpe must be 0–10'], 400);
 
 $sessionId    = isset($body['session_id'])    ? (string)$body['session_id']    : null;
 $assessmentId = isset($body['assessment_id']) ? (string)$body['assessment_id'] : null;
@@ -169,5 +170,14 @@ $response = ['success' => true, 'id' => $feedbackId, 'training_load' => $trainin
 
 if ($postRpe >= 8)  $response['coach_alert'] = 'high_rpe';
 if ($painReported)  $response['coach_alert'] = 'pain_reported';
+
+// Alert the physical coach when post-session feedback flags a concern.
+if (!empty($response['coach_alert']) && $clubId) {
+    notifyClubRole(
+        $pdo, (int)$clubId, 'coach', 'post_session_alert',
+        ['pain_reported' => $painReported, 'rpe' => $postRpe],
+        array_filter(['linked_route' => $sessionId ? '/session/' . $sessionId : null])
+    );
+}
 
 jsonOut($response);

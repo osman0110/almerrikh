@@ -6,6 +6,7 @@ header('Access-Control-Allow-Methods: GET, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once '../db.php';
+require_once '../includes/club_auth.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -38,15 +39,17 @@ function getAuthUser(PDO $pdo): array {
 }
 
 $user = getAuthUser($pdo);
+$ctx = requireClubPermission($pdo, $user, 'players.read');
+$clubId = (int)$ctx['club_id'];
 if (in_array($user['role'], ['player', 'parent'], true)) {
     jsonOut(['error' => 'Forbidden — coaches only'], 403);
 }
 
 $stmt = $pdo->prepare(
     'SELECT id, name, injury_notes FROM club_players
-     WHERE user_id = ? AND is_active = 1 AND injury_notes IS NOT NULL AND injury_notes != ""'
+     WHERE club_id = ? AND is_active = 1 AND injury_notes IS NOT NULL AND injury_notes != ""'
 );
-$stmt->execute([$user['id']]);
+$stmt->execute([$clubId]);
 $injured = $stmt->fetchAll();
 
 $alerts = [];

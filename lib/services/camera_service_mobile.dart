@@ -4,6 +4,27 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../utils/app_logger.dart';
+
+/// Thrown by [CameraService.initialize]/[CameraService.startImageStream]
+/// when the device has no usable camera hardware, so callers can show an
+/// "unsupported device" message instead of a silent black preview.
+class CameraUnsupportedException implements Exception {
+  const CameraUnsupportedException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// Not thrown on mobile today (permission is checked separately via
+/// [CameraService.requestPermission]) — declared here so the type exists
+/// uniformly across the mobile/web/stub camera_service exports.
+class CameraPermissionDeniedException implements Exception {
+  const CameraPermissionDeniedException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
 
 class CameraFrame {
   const CameraFrame({
@@ -12,6 +33,7 @@ class CameraFrame {
     required this.height,
     required this.rotation,
     this.isFront = true,
+    this.timestampMs = 0,
   });
 
   final CameraImage? image;
@@ -19,6 +41,7 @@ class CameraFrame {
   final int height;
   final int rotation;
   final bool isFront;
+  final int timestampMs;
 }
 
 class CameraService {
@@ -37,7 +60,9 @@ class CameraService {
 
   Future<void> initialize({bool preferFront = false}) async {
     final cameras = await availableCameras();
-    if (cameras.isEmpty) return;
+    if (cameras.isEmpty) {
+      throw const CameraUnsupportedException('No camera hardware detected on this device');
+    }
     final direction =
         preferFront ? CameraLensDirection.front : CameraLensDirection.back;
     final camera = cameras.firstWhere(
@@ -58,9 +83,10 @@ class CameraService {
   }
 
   Future<void> startImageStream({bool landscapeLeft = true}) async {
+    if (_streaming) return;
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized || _streaming) {
-      return;
+    if (controller == null || !controller.value.isInitialized) {
+      throw StateError('Camera controller was not initialized before startImageStream()');
     }
     _streaming = true;
     final sensorOrientation = _cameraDescription?.sensorOrientation ?? 0;
@@ -76,8 +102,7 @@ class CameraService {
             ? (sensorOrientation + deviceDeg) % 360
             : (sensorOrientation - deviceDeg + 360) % 360
         : sensorOrientation;
-    debugPrint(
-        'Camera: sensor=$sensorOrientation front=$isFront device=${deviceDeg}° → mlKit=${mlKitRotation}°');
+    AppLogger.i('Camera', 'sensor=$sensorOrientation front=$isFront device=${deviceDeg}° mlKit=${mlKitRotation}°');
     await controller.startImageStream((image) {
       if (_frames.isClosed) return;
       _frames.add(CameraFrame(
@@ -86,6 +111,7 @@ class CameraService {
         height: image.height,
         rotation: mlKitRotation,
         isFront: isFront,
+        timestampMs: DateTime.now().millisecondsSinceEpoch,
       ));
     });
   }
@@ -97,6 +123,11 @@ class CameraService {
     }
     _streaming = false;
   }
+
+  Map<String, Object?> getVideoStatus() => const {
+    'videoFound': false, 'trackState': 'live', 'paused': false,
+    'videoWidth': 0, 'videoHeight': 0,
+  };
 
   Widget buildPreview() {
     final controller = _controller;

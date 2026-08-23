@@ -3,64 +3,132 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart' show openAppSettings;
 import '../../app_colors.dart';
+import '../../app_localizations.dart';
 import '../../models/assessment_result_model.dart';
 import '../../models/player_profile_model.dart';
-import '../../models/club_models.dart';
 import '../../services/camera_service.dart';
 import '../../services/physical_assessment_service.dart';
-import '../../services/pose_detection_service_mobile.dart';
+import '../../services/pose_assessment_config.dart';
+import '../../services/pose_detection_service.dart';
+import '../../services/pose_quality_gate.dart';
+import '../../services/pose_smoothing_service.dart';
+import '../../services/jump_state_machine.dart';
 import '../../services/assessment_storage_service.dart';
-import '../../services/club_service.dart';
+import '../../services/assessment_video_service.dart';
 import '../../services/exercise_engine.dart';
+import '../../utils/app_logger.dart';
+import '../../widgets/pose_debug_overlay.dart';
+import 'assessment_result_page.dart';
 
 enum AssessmentCameraState { setup, ready, countdown, capturing, processing }
+
+/// Camera failure categories the UI must communicate distinctly (RB4):
+/// permission denied, init failure, unsupported device, and a runtime
+/// failure after the camera was already streaming.
+enum _CameraFailureKind { permission, initFailed, unsupported, runtime }
 
 enum _SquatPhase { standing, descent, bottom, ascent }
 
 class AssessmentCameraArguments {
-  const AssessmentCameraArguments({required this.player, required this.testType});
+  const AssessmentCameraArguments({
+    required this.player,
+    required this.testType,
+    this.sessionId,
+    this.attemptGroupId,
+    this.attemptNumber,
+  });
 
   final PlayerProfile player;
   final AssessmentTestType testType;
+  final String? sessionId;
+  /// When retrying the same test, pass the previous attempt's group id so
+  /// all captures can be compared as attempts of the same test-taking session.
+  final String? attemptGroupId;
+  final int? attemptNumber;
 }
 
 class AssessmentCameraPage extends StatefulWidget {
-  const AssessmentCameraPage({super.key, required this.player, required this.testType});
+  const AssessmentCameraPage({
+    super.key,
+    required this.player,
+    required this.testType,
+    this.sessionId,
+    this.onNextPlayer,
+    this.attemptGroupId,
+    this.attemptNumber,
+  });
 
   final PlayerProfile player;
   final AssessmentTestType testType;
+  final String? sessionId;
+  final VoidCallback? onNextPlayer;
+  final String? attemptGroupId;
+  final int? attemptNumber;
 
   @override
   State<AssessmentCameraPage> createState() => _AssessmentCameraPageState();
 }
 
-class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
+class _AssessmentCameraPageState extends State<AssessmentCameraPage>
+    with SingleTickerProviderStateMixin {
   final CameraService _cameraService = CameraService();
   final PoseDetectionService _poseService = PoseDetectionService();
+  final AssessmentVideoService _videoService = AssessmentVideoService();
   final List<PoseSnapshot> _capturedFrames = [];
   StreamSubscription? _frameSubscription;
 
+  // Real READY gate for jump tests — squat tests keep the legacy heuristics.
+  final PoseQualityGate _qualityGate = PoseQualityGate();
+  PoseGateResult? _lastGateResult;
+
+  // One Euro smoothing for jump tests (mobile only) — squat/web keep the EMA.
+  final PoseSmoothingService _smoothingService = PoseSmoothingService();
+
+  // Overlay interpolation (jump tests only): lets the skeleton render at UI
+  // frame rate even though inference only produces a new pose every ~30-50ms.
+  final _SkeletonAnimator _skeletonAnimator = _SkeletonAnimator();
+  Ticker? _skeletonTicker;
+
   AssessmentCameraState _state = AssessmentCameraState.setup;
+  bool _prepGuideShown = false; // preparation guide shown first
   bool _cameraSelected = false; // camera picker shown until user picks
   bool _useFrontCamera = false; // back camera is default
   bool _cameraReady = false;
+  _CameraFailureKind? _cameraFailure;
   bool _capturing = false;
   int _validFrames = 0;
   PoseSnapshot? _latestPose;
   PoseSnapshot? _prevPose;
   bool _saving = false;
+  bool _disposed = false;
+  bool _frameProcessing = false; // drop frames when pose detection is still running
+  int _lastFrameMs = 0;          // timestamp of last processed frame (ms since epoch)
+  static const int _frameThrottleMs = PoseAssessmentConfig.mobileFrameThrottleMs;
+
+  // ── FPS / latency diagnostics (kDebugMode HUD) ──────────────────────────
+  final List<int> _inferenceTimestamps = []; // rolling window, last 30
+  double _inferenceFps = 0.0;
+  int _lastInferenceLatencyMs = 0;
+  final List<int> _uiTickTimestamps = []; // rolling window, last 30
+  double _uiFps = 0.0;
 
   // Live squat metrics
   _SquatPhase _squatPhase = _SquatPhase.standing;
   double _squatDepth = 0.0; // 0 = standing, 1 = deep squat
   double? _prevAvgKneeAngle;
   // Rep-completion tracking
-  bool _repDescended    = false; // has gone below 130° this rep
-  bool _repBottomDone   = false; // has been in bottom phase (<100°)
-  int  _framesAtReturn  = 0;     // consecutive standing frames after bottom
-  int  _repCount        = 0;
+  bool _repBottomDone   = false;
+  int  _framesAtReturn  = 0;
+
+  // Live jump metrics (used for CMJ / SJ live display) — formal state machine
+  // with hysteresis + a frozen baseline, replacing the old single-frame
+  // heuristic that had no minimum durations and drifted its baseline.
+  JumpStateMachine? _jumpStateMachine;
+  double _jumpElevation = 0.0; // 0 = on ground, 1 = peak (derived from frozen baseline)
 
   // ── Calibration state ────────────────────────────────────────────────────
   // HARD blockers (must pass to start)
@@ -90,10 +158,9 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
   int _validStreak   = 0;
   int _invalidStreak = 0;
 
-  // Thresholds
-  static const int _readyStreakRequired   = 2; // 2 consecutive valid frames → near-instant
-  static const int _cancelStreakRequired  = 8; // sustained athlete-loss to cancel countdown
-  static const int _seriousStreakRequired = 3; // fast-cancel when no pose at all
+  // Thresholds — from PoseAssessmentConfig (no magic numbers here)
+  static const int _cancelStreakRequired  = PoseAssessmentConfig.cancelStreakRequired;
+  static const int _seriousStreakRequired = PoseAssessmentConfig.seriousStreakRequired;
 
   // Lower-body temporal smoothing — display only; scoring uses raw validated frames
   final Map<String, Offset> _displayLandmarks = {};
@@ -101,29 +168,58 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
   int _rejectedFrames = 0;
   int _acceptedFrames = 0;
 
-  static const int _targetFrameCount = 90;
-  static const double _brightnessThreshold = 70.0; // 0–255 Y-plane scale
+  static const int    _targetFrameCount    = PoseAssessmentConfig.targetFrameCount;
+  static const double _brightnessThreshold = PoseAssessmentConfig.brightnessThreshold;
 
-  // EMA weight for new frame (lower = smoother but more lag)
-  static const double _emaAlpha = 0.22;
-  static const double _emaAlphaUpper = 0.45; // less smoothing for upper body
-  static const Set<String> _lowerBodyKeys = {
-    'leftHip', 'rightHip',
-    'leftKnee', 'rightKnee',
-    'leftAnkle', 'rightAnkle',
-  };
+  static const double _emaAlpha      = PoseAssessmentConfig.emaAlphaLower;
+  static const double _emaAlphaUpper = PoseAssessmentConfig.emaAlphaUpper;
+  static const Set<String> _lowerBodyKeys = PoseAssessmentConfig.lowerBodyKeys;
+
+  // Groups multiple captures of the same test-taking session together so a
+  // best/average attempt can be computed. A fresh group starts unless the
+  // caller explicitly passed one in (i.e. this is a retry of a prior attempt).
+  late final String _attemptGroupId = widget.attemptGroupId ??
+      '${widget.player.id}_${widget.testType.name}_${DateTime.now().millisecondsSinceEpoch}';
+  late final int _attemptNumber = widget.attemptNumber ?? 1;
 
   @override
   void initState() {
     super.initState();
     _setLandscape();
     // Camera initialisation waits for user to pick front/back
+    if (widget.testType.isJumpTest) {
+      _skeletonTicker = createTicker(_onSkeletonTick)..start();
+      _jumpStateMachine = JumpStateMachine(
+        isSquatJump: widget.testType == AssessmentTestType.squatJump,
+      );
+    }
+  }
+
+  void _onSkeletonTick(Duration elapsed) {
+    if (!mounted) return;
+    _skeletonAnimator.tick();
+    if (kDebugMode) {
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      _uiTickTimestamps.add(nowMs);
+      if (_uiTickTimestamps.length > 30) _uiTickTimestamps.removeAt(0);
+      if (_uiTickTimestamps.length >= 2) {
+        final spanMs = _uiTickTimestamps.last - _uiTickTimestamps.first;
+        if (spanMs > 0) {
+          _uiFps = (_uiTickTimestamps.length - 1) * 1000.0 / spanMs;
+        }
+      }
+    }
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _countdownTimer?.cancel();
     _frameSubscription?.cancel();
+    // No-op if finish()/discard() already ran (e.g. after a successful capture).
+    unawaited(_videoService.discard());
+    _skeletonTicker?.dispose();
+    _skeletonAnimator.dispose();
     _cameraService.dispose();
     _poseService.dispose();
     _restoreOrientation();
@@ -131,6 +227,7 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
   }
 
   void _setLandscape() {
+    if (kIsWeb) return; // SystemChrome has no effect on browsers.
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
@@ -139,6 +236,7 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
   }
 
   void _restoreOrientation() {
+    if (kIsWeb) return;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
@@ -147,6 +245,10 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
   }
 
   void _selectCamera(bool front) {
+    _qualityGate.reset();
+    _smoothingService.reset();
+    _skeletonAnimator.reset();
+    _jumpStateMachine?.reset();
     setState(() {
       _useFrontCamera = front;
       _cameraSelected = true;
@@ -155,17 +257,54 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
   }
 
   Future<void> _initializeCamera({bool preferFront = false}) async {
+    setState(() => _cameraFailure = null);
+
     final granted = await _cameraService.requestPermission();
-    if (!granted) return;
+    if (!granted) {
+      AppLogger.w('Camera', 'Permission request denied by user/OS');
+      if (mounted) setState(() => _cameraFailure = _CameraFailureKind.permission);
+      return;
+    }
 
     try {
       await _cameraService.initialize(preferFront: preferFront);
       await _cameraService.startImageStream();
-      _frameSubscription = _cameraService.frames.listen(_onFrameReceived);
-      setState(() => _cameraReady = true);
-    } catch (_) {
-      // Camera failed — UI shows black preview, setup checks stay false
+      _frameSubscription = _cameraService.frames.listen(
+        _onFrameReceived,
+        onError: (Object e, StackTrace st) {
+          AppLogger.e('Camera', 'Frame stream error after camera was running', e);
+          if (_disposed || !mounted) return;
+          setState(() {
+            _cameraReady = false;
+            _cameraFailure = _CameraFailureKind.runtime;
+          });
+        },
+      );
+      if (mounted) setState(() => _cameraReady = true);
+    } catch (e) {
+      AppLogger.e('Camera', 'Camera initialization failed', e);
+      if (!mounted) return;
+      setState(() => _cameraFailure = _classifyCameraError(e));
     }
+  }
+
+  _CameraFailureKind _classifyCameraError(Object e) {
+    final name = e.runtimeType.toString();
+    if (name == 'CameraPermissionDeniedException') return _CameraFailureKind.permission;
+    if (name == 'CameraUnsupportedException') return _CameraFailureKind.unsupported;
+    return _CameraFailureKind.initFailed;
+  }
+
+  Future<void> _retryCameraInit() async {
+    AppLogger.i('Camera', 'User requested retry after failure');
+    _frameSubscription?.cancel();
+    _frameSubscription = null;
+    if (!mounted) return;
+    setState(() {
+      _cameraReady = false;
+      _cameraFailure = null;
+    });
+    await _initializeCamera(preferFront: _useFrontCamera);
   }
 
   /// Samples the Y-plane (luminance) of the raw camera frame and returns
@@ -191,99 +330,153 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
     }
   }
 
-  Future<void> _onFrameReceived(dynamic rawFrame) async {
-    if (!_cameraReady) return;
-    if (rawFrame is! CameraFrame) return;
-
-    // Always measure brightness so the calibration checklist reflects reality.
-    final brightness = _computeFrameBrightness(rawFrame);
-
-    final snapshot = await _poseService.detect(rawFrame);
-
-    // ── Countdown: skeleton update + catastrophic-cancel check only ──────────
-    if (_state == AssessmentCameraState.countdown) {
-      _checkCancelDuringCountdown(snapshot);
-      return;
-    }
-
-    // ── Setup calibration phase ───────────────────────────────────────────────
-    if (!_capturing) {
-      _updateCalibration(snapshot, brightness);
-      return;
-    }
-
-    // ── Recording phase ────────────────────────────────────────────────────
-    if (snapshot == null) return;
-    if (_capturedFrames.length >= _targetFrameCount) return; // overflow guard
-
-    // Multi-gate rejection before touching smoothing state
-    final bool lowerBodyOk = _isLowerBodyValid(snapshot);
-    final bool noSpike = !_hasLandmarkSpike(snapshot);
-    final bool noAngleGlitch = !_hasImpossibleAngle(snapshot);
-    final bool validFrame = snapshot.bodyFullyVisible &&
-        snapshot.confidence > 0.45 &&
-        snapshot.landmarkCount >= 10 &&
-        lowerBodyOk &&
-        noSpike &&
-        noAngleGlitch;
-
-    // Only update smoothing on non-spiking frames to avoid contaminating EMA
-    if (noSpike && lowerBodyOk) {
-      _applySmoothing(snapshot);
-      _updateSquatMetrics();
-    }
-
-    setState(() {
-      _latestPose = snapshot;
-      if (validFrame) {
-        _validFrames += 1;
-        _capturedFrames.add(snapshot);
-        _acceptedFrames += 1;
-      } else {
-        _rejectedFrames += 1;
+  /// Updates rolling inference FPS/latency stats used by the debug HUD.
+  void _recordInferenceMetrics(int inferenceStartMs) {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    _lastInferenceLatencyMs = nowMs - inferenceStartMs;
+    _inferenceTimestamps.add(nowMs);
+    if (_inferenceTimestamps.length > 30) _inferenceTimestamps.removeAt(0);
+    if (_inferenceTimestamps.length >= 2) {
+      final spanMs = _inferenceTimestamps.last - _inferenceTimestamps.first;
+      if (spanMs > 0) {
+        _inferenceFps =
+            (_inferenceTimestamps.length - 1) * 1000.0 / spanMs;
       }
-    });
-
-    _prevPose = snapshot;
-
-    if (_capturedFrames.length >= _targetFrameCount) {
-      await _finishAssessment();
     }
   }
 
+  Future<void> _onFrameReceived(dynamic rawFrame) async {
+    if (_disposed || !_cameraReady) return;
+    if (rawFrame is! CameraFrame) return;
+    // Drop frame if previous pose detection is still running — prevents
+    // BLASTBufferQueue overflow ("Already acquired max frames").
+    if (_frameProcessing) return;
+    // Throttle: skip frame if processed one too recently (reduces BLASTBufferQueue pressure)
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (nowMs - _lastFrameMs < _frameThrottleMs) return;
+    _lastFrameMs = nowMs;
+    _frameProcessing = true;
+    try {
+      // Always measure brightness so the calibration checklist reflects reality.
+      final brightness = _computeFrameBrightness(rawFrame);
+
+      final inferenceStartMs = DateTime.now().millisecondsSinceEpoch;
+      final snapshot = await _poseService.detect(rawFrame);
+      _recordInferenceMetrics(inferenceStartMs);
+
+      // Guard: widget may have been disposed while pose detection was in flight.
+      if (_disposed || !mounted) return;
+
+      // ── Countdown: skeleton update + catastrophic-cancel check only ──────────
+      if (_state == AssessmentCameraState.countdown) {
+        _checkCancelDuringCountdown(snapshot);
+        return;
+      }
+
+      // ── Setup calibration phase ───────────────────────────────────────────────
+      if (!_capturing) {
+        _updateCalibration(snapshot, brightness);
+        return;
+      }
+
+      // ── Recording phase ────────────────────────────────────────────────────
+      if (snapshot == null) return;
+      if (_capturedFrames.length >= _targetFrameCount) return; // overflow guard
+
+      // Multi-gate rejection before touching smoothing state
+      final bool lowerBodyOk = _isLowerBodyValid(snapshot);
+      final bool noSpike = !_hasLandmarkSpike(snapshot);
+      final bool noAngleGlitch = !_hasImpossibleAngle(snapshot);
+      // Same PoseQualityGate definition for every test type, so ok:/rej:
+      // counters, READY, and every debug surface (skeleton legQ,
+      // PoseDebugOverlay) share one definition — squat tests no longer run a
+      // separate, looser "legacy" check that let a too-far body through.
+      final gateResult = _qualityGate.evaluate(snapshot, brightness);
+      _lastGateResult = gateResult;
+      final bool validFrame;
+      if (widget.testType.isJumpTest) {
+        validFrame = gateResult.frameValid;
+      } else {
+        // Squat tests additionally reject frame-to-frame landmark spikes and
+        // anatomically impossible angles — signals PoseQualityGate doesn't
+        // check but that JumpStateMachine handles separately for jump tests.
+        validFrame = gateResult.frameValid &&
+            lowerBodyOk &&
+            noSpike &&
+            noAngleGlitch;
+      }
+
+      // Only update smoothing on non-spiking frames to avoid contaminating EMA.
+      // Squat phase (STANDING/BOTTOM/etc.) must never be derived from an
+      // invalid frame — freeze the last known phase instead of transitioning
+      // off a too-far/too-close/glitched reading.
+      if (noSpike && lowerBodyOk && (widget.testType.isJumpTest || validFrame)) {
+        _applySmoothing(snapshot);
+        if (widget.testType.isJumpTest) {
+          _updateJumpMetrics(snapshot, validFrame);
+        } else {
+          _updateSquatMetrics();
+        }
+      }
+
+      if (_disposed || !mounted) return;
+      setState(() {
+        _latestPose = snapshot;
+        if (validFrame) {
+          _validFrames += 1;
+          _capturedFrames.add(snapshot);
+          _acceptedFrames += 1;
+          _videoService.addFrame(rawFrame);
+        } else {
+          _rejectedFrames += 1;
+        }
+      });
+
+      _prevPose = snapshot;
+
+      if (_capturedFrames.length >= _targetFrameCount) {
+        await _finishAssessment();
+      }
+    } finally {
+      _frameProcessing = false;
+    }
+  }
+
+  /// True when [key] clears the jump-test required-landmark likelihood floor.
+  bool _hasLikelihood(Map<String, double> likelihoods, String key) =>
+      (likelihoods[key] ?? 0) >= PoseAssessmentConfig.gateMinLandmarkLikelihood;
+
   void _updateCalibration(PoseSnapshot? snapshot, double brightness) {
-    final lm = snapshot?.landmarks ?? {};
+    final likelihoods = snapshot?.likelihoods ?? {};
 
-    // ── HARD blockers — evaluated every frame ─────────────────────────────────
-    final poseOk = snapshot != null &&
-        snapshot.confidence > 0.15 &&
-        snapshot.landmarkCount >= 4;
-
-    final kneesOk  = poseOk &&
-        (lm.containsKey('leftKnee') || lm.containsKey('rightKnee'));
-    final hipsOk   = poseOk &&
-        (lm.containsKey('leftHip')  || lm.containsKey('rightHip'));
-    final ankleOk  = poseOk &&
-        (lm.containsKey('leftAnkle') || lm.containsKey('rightAnkle'));
-
-    // Lower-body average confidence: use snapshot confidence as proxy
-    final lbConf   = poseOk ? snapshot.confidence : 0.0;
-
-    final requiredOk = poseOk && kneesOk && hipsOk && ankleOk && lbConf >= 0.40;
-
-    // ── SOFT warnings — never block start ────────────────────────────────────
-    final bothKnees  = poseOk &&
-        lm.containsKey('leftKnee') && lm.containsKey('rightKnee');
-    final bothAnkles = poseOk &&
-        lm.containsKey('leftAnkle') && lm.containsKey('rightAnkle');
-    final fullBody   = poseOk && snapshot.bodyFullyVisible;
-    final centered   = poseOk &&
+    // ── Single READY gate for every test type: 20-frame streak, rejection
+    // ratio, per-landmark likelihood, body scale, edge margin — see
+    // PoseQualityGate. Squat tests used to run a separate, looser "legacy"
+    // check that let a too-far/cropped body through; now every test shares
+    // the exact same pass/fail definition. ─────────────────────────────────
+    final gateResult = _qualityGate.evaluate(snapshot, brightness);
+    final bool poseOk    = snapshot != null && snapshot.landmarkCount > 0;
+    final bool kneesOk   = _hasLikelihood(likelihoods, 'leftKnee') || _hasLikelihood(likelihoods, 'rightKnee');
+    final bool hipsOk    = _hasLikelihood(likelihoods, 'leftHip')  || _hasLikelihood(likelihoods, 'rightHip');
+    final bool ankleOk   = _hasLikelihood(likelihoods, 'leftAnkle') || _hasLikelihood(likelihoods, 'rightAnkle');
+    final bool bothKnees = _hasLikelihood(likelihoods, 'leftKnee') && _hasLikelihood(likelihoods, 'rightKnee');
+    final bool bothAnkles = _hasLikelihood(likelihoods, 'leftAnkle') && _hasLikelihood(likelihoods, 'rightAnkle');
+    final bool fullBody  = gateResult.frameValid;
+    final bool centered  = poseOk &&
         snapshot.center != null &&
         (snapshot.center!.dx - 0.5).abs() < 0.25;
-    final distOk     = poseOk && !snapshot.tooClose && !snapshot.tooFar;
-    final bool? lightOk = brightness >= 0
-        ? brightness >= _brightnessThreshold
-        : null;
+    final h = snapshot?.bodyBox?.height ?? 0;
+    final bool distOk    = poseOk &&
+        h >= PoseAssessmentConfig.gateBodyHeightMin &&
+        h <= PoseAssessmentConfig.gateBodyHeightMax;
+    final bool? lightOk  = brightness >= 0 ? brightness >= _brightnessThreshold : null;
+    final double lbConf  = gateResult.legQuality;
+    final bool requiredOk = gateResult.frameValid;
+    final bool seriousFailure = !poseOk;
+    final String blocking = gateResult.failReason;
+    final bool readyToStart = gateResult.isReady;
+
+    _lastGateResult = gateResult;
 
     int softWarnings = 0;
     if (!bothKnees)        softWarnings++;
@@ -292,19 +485,6 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
     if (!centered)         softWarnings++;
     if (!distOk)           softWarnings++;
     if (lightOk == false)  softWarnings++;
-
-    // Blocking reason (shown in debug + hint)
-    String blocking = '';
-    if (!poseOk)   blocking = 'No pose detected';
-    else if (!hipsOk)   blocking = 'Hips not visible';
-    else if (!kneesOk)  blocking = 'Knees not visible';
-    else if (!ankleOk)  blocking = 'No ankle/foot detected';
-    else if (lbConf < 0.40) blocking = 'Low confidence (${(lbConf * 100).round()}%)';
-
-    // Serious hard failure for fast cancel during countdown
-    final seriousFailure = !poseOk ||
-        snapshot.confidence < 0.20 ||
-        snapshot.landmarkCount < 4;
 
     if (poseOk) _applySmoothing(snapshot);
 
@@ -320,12 +500,11 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
       }
     }
 
-    debugPrint(
-      '[Calib] req=$requiredOk valid=$_validStreak invalid=$_invalidStreak '
-      'soft=$softWarnings conf=${lbConf.toStringAsFixed(2)} '
-      'state=$_state ${blocking.isNotEmpty ? "BLOCK: $blocking" : ""}',
-    );
+    AppLogger.i('Camera.calib',
+      'req=$requiredOk valid=$_validStreak invalid=$_invalidStreak '
+      'conf=${lbConf.toStringAsFixed(2)} state=$_state');
 
+    if (_disposed || !mounted) return;
     setState(() {
       _latestPose = snapshot;
 
@@ -340,7 +519,9 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
         _fullBodyVisible   = fullBody;
         _athleteCentered   = centered;
         _distanceValid     = distOk;
-        _requiredPass      = requiredOk;
+        // Header chip reflects true cumulative readiness (streak + rejection
+        // ratio), not just this single frame — same gate for every test type.
+        _requiredPass      = readyToStart;
         _softWarningCount  = softWarnings;
         _blockingReason    = blocking;
         if (brightness >= 0) _goodLighting = lightOk;
@@ -348,8 +529,9 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
 
       // ── State transitions (debounced) ──────────────────────────────────────
       if (_state == AssessmentCameraState.setup) {
-        if (_validStreak >= _readyStreakRequired && _countdownTimer == null) {
-          debugPrint('[Calib] → COUNTDOWN START (streak=$_validStreak)');
+        final shouldStart = readyToStart;
+        if (shouldStart && _countdownTimer == null) {
+          AppLogger.i('Camera.calib', 'COUNTDOWN START streak=$_validStreak ready=$readyToStart');
           _startCountdown();
         }
       } else if (_state == AssessmentCameraState.countdown) {
@@ -359,10 +541,7 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
         final seriousSustain = seriousFailure && _invalidStreak >= _seriousStreakRequired;
 
         if (sustainedHard || seriousSustain) {
-          debugPrint(
-            '[Calib] → CANCELLED (invalid=$_invalidStreak '
-            'serious=$seriousFailure reason="$blocking")',
-          );
+          AppLogger.i('Camera.calib', 'CANCELLED invalid=$_invalidStreak serious=$seriousFailure');
           _state = AssessmentCameraState.setup;
           _cancelCountdown();
           // Refresh all fields after cancel
@@ -375,7 +554,7 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
           _fullBodyVisible   = fullBody;
           _athleteCentered   = centered;
           _distanceValid     = distOk;
-          _requiredPass      = requiredOk;
+          _requiredPass      = readyToStart;
           _softWarningCount  = softWarnings;
           _blockingReason    = blocking;
           if (brightness >= 0) _goodLighting = lightOk;
@@ -389,7 +568,7 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
     if (_countdownTimer != null) return;
     _countdown = 3;
     _state = AssessmentCameraState.countdown;
-    debugPrint('[Calib] countdown timer created');
+    AppLogger.i('Camera.calib', 'Countdown timer created');
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) {
         t.cancel();
@@ -397,7 +576,7 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
       }
       setState(() {
         _countdown--;
-        debugPrint('[Calib] tick → $_countdown');
+        AppLogger.i('Camera.calib', 'tick=$_countdown');
         if (_countdown <= 0) {
           t.cancel();
           _countdownTimer = null;
@@ -413,6 +592,10 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
     _countdown = 3;
     _validStreak = 0;
     _invalidStreak = 0;
+    _qualityGate.reset();
+    _smoothingService.reset();
+    _skeletonAnimator.reset();
+    _jumpStateMachine?.reset();
   }
 
   /// Lightweight check called every frame DURING countdown.
@@ -441,13 +624,13 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
       _applySmoothing(snapshot);
     }
 
-    debugPrint('[Countdown] hardLost=$hardLost invalidStreak=$_invalidStreak');
+    AppLogger.i('Camera.countdown', 'hardLost=$hardLost invalidStreak=$_invalidStreak');
 
     final shouldCancel = _invalidStreak >= _cancelStreakRequired ||
         (athleteLost && _invalidStreak >= _seriousStreakRequired);
 
     if (shouldCancel) {
-      debugPrint('[Countdown] CANCELLED — athlete lost for $_invalidStreak frames');
+      AppLogger.w('Camera.countdown', 'CANCELLED — lost for $_invalidStreak frames');
       setState(() {
         _state = AssessmentCameraState.setup;
         _cancelCountdown();
@@ -470,6 +653,14 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
     _state = AssessmentCameraState.capturing;
     _capturedFrames.clear();
     _validFrames = 0;
+    _qualityGate.reset();
+    _smoothingService.reset();
+    _skeletonAnimator.reset();
+    _jumpStateMachine?.reset();
+    // Fire-and-forget: a frame or two may be dropped by addFrame() while the
+    // temp dir is being created, which is fine for a review-only sequence.
+    unawaited(_videoService.start(
+        '${widget.player.id}_${DateTime.now().millisecondsSinceEpoch}'));
   }
 
   void _stopCapture() {
@@ -479,11 +670,39 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
       _capturedFrames.clear();
       _validFrames = 0;
     });
+    unawaited(_videoService.discard());
+    _qualityGate.reset();
+    _smoothingService.reset();
+    _skeletonAnimator.reset();
+    _jumpStateMachine?.reset();
   }
 
   // ── Smoothing ────────────────────────────────────────────────────────────
 
   void _applySmoothing(PoseSnapshot snapshot) {
+    // Jump tests on mobile use the One Euro filter (better jitter/lag
+    // trade-off); squat tests and web keep the original adaptive EMA.
+    if (!kIsWeb && widget.testType.isJumpTest) {
+      final smoothed = _smoothingService.smooth(snapshot);
+      _displayLandmarks
+        ..clear()
+        ..addAll(smoothed);
+      final box = snapshot.bodyBox;
+      if (box != null) {
+        final prev = _displayBox;
+        _displayBox = prev == null
+            ? box
+            : Rect.fromLTRB(
+                prev.left * 0.7 + box.left * 0.3,
+                prev.top * 0.7 + box.top * 0.3,
+                prev.right * 0.7 + box.right * 0.3,
+                prev.bottom * 0.7 + box.bottom * 0.3,
+              );
+      }
+      _skeletonAnimator.push(smoothed, _displayBox, snapshot.timestampMs);
+      return;
+    }
+
     final raw = snapshot.landmarks;
     for (final key in raw.keys) {
       final curr = raw[key]!;
@@ -580,6 +799,7 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
   Future<void> _finishAssessment() async {
     if (_saving) return;
     if (_capturedFrames.length < 12) {
+      unawaited(_videoService.discard());
       setState(() {
         _capturing = false;
         _state = AssessmentCameraState.setup;
@@ -598,61 +818,68 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
       widget.player.id,
       widget.player.name,
       _capturedFrames,
+      playerHeightCm: widget.player.heightCm?.toDouble(),
     );
 
-    // Save to both storage services
-    await AssessmentStorageService.instance.saveAssessment(result);
+    // Session assessments stay separate from wellness, RPE and training load.
+    final sessionAssessmentResult = result
+        .copyWithSession(widget.sessionId)
+        .copyWithAttempt(attemptGroupId: _attemptGroupId, attemptNumber: _attemptNumber);
+    await AssessmentStorageService.instance.saveAssessment(sessionAssessmentResult);
 
-    // Also save to club service so it appears in player profile history
-    final assessmentType = _testTypeToAssessmentType(widget.testType);
-    await ClubService().addAssessment(PlayerAssessment(
-      id: '',
-      playerId: result.playerId,
-      playerName: result.playerName,
-      sessionId: '',
-      sessionName: '',
-      type: assessmentType,
-      date: result.createdAt,
-      movementQualityScore: result.movementQualityScore.toDouble(),
-      stabilityScore: result.stabilityScore.toDouble(),
-      symmetryScore: result.symmetryScore.toDouble(),
-      controlScore: result.controlScore.toDouble(),
-      overallScore: result.overallScore.toDouble(),
-      assessmentQuality: result.qualityScore.toDouble(),
-      detectedIssues: result.issues,
-      recommendations: result.correctionTips,
-    ));
+    // Keep the review video only for a usable capture — an invalid attempt
+    // gets retried anyway, so there's nothing for a coach to certify.
+    String? videoFramesDir;
+    if (sessionAssessmentResult.isValidAttempt) {
+      videoFramesDir = await _videoService.finish();
+    } else {
+      unawaited(_videoService.discard());
+    }
 
-    setState(() {
-      _saving = false;
-    });
+    if (_disposed || !mounted) return;
+    // Stop camera stream before pushing result page — prevents BLASTBufferQueue
+    // overflow from frames arriving while result page is rendering.
+    _frameSubscription?.cancel();
+    _frameSubscription = null;
+    setState(() => _saving = false);
 
     if (!mounted) return;
-    Navigator.of(context).pushReplacementNamed(
-      '/physical-assessment/result',
-      arguments: result,
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => AssessmentResultPage(
+          result: sessionAssessmentResult,
+          videoFramesDir: videoFramesDir,
+          onNextPlayer: widget.onNextPlayer,
+          onRetry: () => Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => AssessmentCameraPage(
+                player: widget.player,
+                testType: widget.testType,
+                sessionId: widget.sessionId,
+                onNextPlayer: widget.onNextPlayer,
+                attemptGroupId: _attemptGroupId,
+                attemptNumber: _attemptNumber + 1,
+              ),
+            ),
+          ),
+        ),
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
+        transitionDuration: const Duration(milliseconds: 200),
+      ),
     );
-  }
-
-  AssessmentType _testTypeToAssessmentType(AssessmentTestType testType) {
-    switch (testType) {
-      case AssessmentTestType.squat:
-        return AssessmentType.squat;
-      case AssessmentTestType.singleLegBalance:
-        return AssessmentType.singleLegBalance;
-      case AssessmentTestType.jumpLanding:
-        return AssessmentType.jumpLanding;
-      case AssessmentTestType.lunge:
-        return AssessmentType.lunge;
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (MediaQuery.of(context).orientation == Orientation.portrait) {
+    // Orientation lock only applies on native; SystemChrome has no effect on web.
+    if (!kIsWeb &&
+        MediaQuery.of(context).orientation == Orientation.portrait) {
       return _buildRotatePrompt();
     }
 
+    if (_cameraFailure != null) return _buildCameraErrorScreen(_cameraFailure!);
+    if (!_prepGuideShown) return _buildPrepGuide();
     if (!_cameraSelected) return _buildCameraSelector();
 
     final progress = (_validFrames / _targetFrameCount).clamp(0.0, 1.0);
@@ -678,6 +905,13 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
                     : _latestPose!.landmarks,
                 rejectedFrames: _rejectedFrames,
                 acceptedFrames: _acceptedFrames,
+                animator: widget.testType.isJumpTest ? _skeletonAnimator : null,
+                hideFacePoints: widget.testType.isJumpTest,
+                medianLeftKneeAngle: _jumpStateMachine?.medianLeftKneeAngle,
+                medianRightKneeAngle: _jumpStateMachine?.medianRightKneeAngle,
+                debugState: kDebugMode ? _jumpStateMachine?.state.name : null,
+                lowerBodyQualityOverride:
+                    widget.testType.isJumpTest ? _lastGateResult?.legQuality : null,
               ),
               size: Size.infinite,
             ),
@@ -698,14 +932,14 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
           if (_state == AssessmentCameraState.processing)
             Container(
               color: Colors.black54,
-              child: const Center(
+              child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(color: AppColors.primary),
-                    SizedBox(height: 16),
-                    Text('Analysing movement…',
-                        style: TextStyle(color: Colors.white, fontSize: 16)),
+                    const CircularProgressIndicator(color: AppColors.primary),
+                    const SizedBox(height: 16),
+                    Text(AppLocalizations.get('assessment_processing'),
+                        style: const TextStyle(color: Colors.white, fontSize: 16)),
                   ],
                 ),
               ),
@@ -728,7 +962,21 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: _buildBottomHUD(progress),
+            child: SafeArea(
+              top: false,
+              child: _buildBottomHUD(progress),
+            ),
+          ),
+
+          // ── Debug overlay (kDebugMode only) ──────────────────────────────
+          PoseDebugOverlay(
+            enabled: true,
+            snapshot: _latestPose,
+            engineName:   kIsWeb ? PoseDetectionService.engineName   : 'ML Kit',
+            engineStatus: kIsWeb ? PoseDetectionService.engineStatus : 'running',
+            engineFps:    kIsWeb ? PoseDetectionService.engineFps    : null,
+            engineError:  kIsWeb ? PoseDetectionService.lastError    : null,
+            gateResult:   widget.testType.isJumpTest ? _lastGateResult : null,
           ),
         ],
       ),
@@ -737,21 +985,57 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
 
   // ── Setup checklist HUD ───────────────────────────────────────────────────
 
+  /// Compact per-landmark likelihood row for the required jump-test joints,
+  /// e.g. "LH:82 RH:79 LK:91 RK:88 LA:70 RA:65 HE:40 FI:35". Never shows a
+  /// single global confidence value as the sole quality signal.
+  String _likelihoodRow() {
+    final lm = _latestPose?.likelihoods ?? const {};
+    String pct(String key) => ((lm[key] ?? 0) * 100).round().toString();
+    return 'LH:${pct('leftHip')} RH:${pct('rightHip')} '
+        'LK:${pct('leftKnee')} RK:${pct('rightKnee')} '
+        'LA:${pct('leftAnkle')} RA:${pct('rightAnkle')} '
+        'HE:${pct('leftHeel')}/${pct('rightHeel')} '
+        'FI:${pct('leftFootIndex')}/${pct('rightFootIndex')}\n';
+  }
+
+  String _guidanceHint(PoseGateGuidance guidance) {
+    switch (guidance) {
+      case PoseGateGuidance.noBody:
+        return AppLocalizations.get('guidance_no_body');
+      case PoseGateGuidance.stepBack:
+        return AppLocalizations.get('guidance_step_back');
+      case PoseGateGuidance.stepCloser:
+        return AppLocalizations.get('guidance_step_closer');
+      case PoseGateGuidance.showFeet:
+        return AppLocalizations.get('guidance_show_feet');
+      case PoseGateGuidance.improveLighting:
+        return AppLocalizations.get('guidance_improve_lighting');
+      case PoseGateGuidance.holdPhoneSteady:
+        return AppLocalizations.get('guidance_hold_phone_steady');
+      case PoseGateGuidance.holdStill:
+        return AppLocalizations.get('guidance_hold_still');
+      case PoseGateGuidance.none:
+        return AppLocalizations.get('calibration_ready_message');
+    }
+  }
+
   Widget _buildSetupHUD() {
     // Primary hint driven by first failing hard blocker
     final String hint;
-    if (!_poseDetected) {
-      hint = 'Step into frame — face the camera';
+    if (widget.testType.isJumpTest && _lastGateResult != null) {
+      hint = _guidanceHint(_lastGateResult!.guidance);
+    } else if (!_poseDetected) {
+      hint = AppLocalizations.get('status_not_visible_hint');
     } else if (!_hipsVisible) {
-      hint = 'Move back — hips not detected';
+      hint = AppLocalizations.get('calibration_full_body_hint');
     } else if (!_kneesVisible) {
-      hint = 'Ensure knees are visible';
+      hint = AppLocalizations.get('calibration_full_body_hint');
     } else if (!_ankleVisible) {
-      hint = 'Move back until at least one foot is visible';
+      hint = AppLocalizations.get('calibration_distance_hint');
     } else if (_requiredPass) {
-      hint = 'Hold still… starting soon';
+      hint = AppLocalizations.get('calibration_ready_message');
     } else {
-      hint = 'Adjust position';
+      hint = AppLocalizations.get('calibration_setup_body');
     }
 
     return Container(
@@ -860,14 +1144,59 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
             style: const TextStyle(color: Colors.white24, fontSize: 9.5),
           ),
 
+          // ── Web: AI loading / low-FPS indicators ─────────────────────────
+          if (kIsWeb) ...[
+            const SizedBox(height: 8),
+            Container(height: 0.5, color: Colors.white12),
+            const SizedBox(height: 6),
+            if (!_poseDetected)
+              const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 10, height: 10,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 1.5, color: AppColors.primary),
+                  ),
+                  SizedBox(width: 6),
+                  Text('Initializing AI model…',
+                      style: TextStyle(color: Colors.white38, fontSize: 10)),
+                ],
+              )
+            else if (PoseDetectionService.engineFps > 0 &&
+                     PoseDetectionService.engineFps < PoseAssessmentConfig.lowFpsWarning)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.warning_amber_rounded,
+                      color: Colors.amber, size: 11),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Slow device — ${PoseDetectionService.engineFps.toStringAsFixed(0)} FPS',
+                    style: const TextStyle(color: Colors.amber, fontSize: 10),
+                  ),
+                ],
+              ),
+            // ── Camera stream status (always visible on web) ───────────────
+            const SizedBox(height: 6),
+            _buildWebCameraStatus(),
+          ],
+
           // ── Debug strip ──────────────────────────────────────────────────
           if (kDebugMode) ...[
             const SizedBox(height: 8),
             Container(height: 0.5, color: Colors.white12),
             const SizedBox(height: 6),
+            // Quality breakdown (Overall/Upper/Lower/Stable/Feet/Head/Scale)
+            // lives in PoseDebugOverlay only — this strip covers what that
+            // widget doesn't: FPS/latency, the setup streak, and (for jump
+            // tests) the state machine + per-landmark likelihoods.
             Text(
               'req=$_requiredPass  warn=$_softWarningCount\n'
               'streak=$_validStreak  inv=$_invalidStreak\n'
+              'infFPS=${_inferenceFps.toStringAsFixed(1)}  uiFPS=${_uiFps.toStringAsFixed(1)}  lat=${_lastInferenceLatencyMs}ms\n'
+              '${widget.testType.isJumpTest ? "jumpState=${_jumpStateMachine?.state.name ?? '-'}\n" : ""}'
+              '${widget.testType.isJumpTest ? _likelihoodRow() : ""}'
               '${_blockingReason.isNotEmpty ? "block: $_blockingReason" : ""}',
               style: const TextStyle(
                 color: Colors.yellow,
@@ -933,14 +1262,60 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
               ),
             ),
             const SizedBox(height: 8),
-            const Text('Get ready…',
-                style: TextStyle(
+            Text(AppLocalizations.get('calibration_start_countdown'),
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 20,
                     fontWeight: FontWeight.w600)),
           ],
         ),
       ),
+    );
+  }
+
+  // ── Web camera stream status widget ──────────────────────────────────────
+
+  Widget _buildWebCameraStatus() {
+    if (!kIsWeb) return const SizedBox.shrink();
+    final status = _cameraService.getVideoStatus();
+    final found      = status['videoFound']   as bool?   ?? false;
+    final trackState = status['trackState']   as String? ?? 'none';
+    final paused     = status['paused']       as bool?   ?? true;
+    final w          = status['videoWidth']   as int?    ?? 0;
+    final h          = status['videoHeight']  as int?    ?? 0;
+
+    final camLive   = found && trackState == 'live' && !paused;
+    final modelReady = PoseDetectionService.isModelReady;
+
+    Color _dot(bool ok) => ok ? Colors.greenAccent : Colors.redAccent;
+
+    Widget _row(String label, bool ok, [String? detail]) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.circle, color: _dot(ok), size: 7),
+        const SizedBox(width: 5),
+        Text(
+          '$label${detail != null ? " ($detail)" : ""}',
+          style: TextStyle(
+            color: ok ? Colors.white54 : Colors.redAccent,
+            fontSize: 9,
+          ),
+        ),
+      ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _row('Camera live',   camLive,    trackState),
+        const SizedBox(height: 2),
+        _row('Track live',    trackState == 'live'),
+        const SizedBox(height: 2),
+        _row('Video playing', !paused, w > 0 ? '${w}×$h' : null),
+        const SizedBox(height: 2),
+        _row('Model ready',   modelReady),
+      ],
     );
   }
 
@@ -963,6 +1338,32 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // ── Web: body not visible warning during capture ─────────────────
+          if (isCapturing && kIsWeb && !_fullBodyVisible) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.18),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.withOpacity(0.5)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Body not fully visible — step back\n'
+                      'الجسم غير مرئي بالكامل — ابتعد قليلاً',
+                      style: TextStyle(color: Colors.amber, fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           if (isCapturing) ...[
             // Frame progress bar
             LinearProgressIndicator(
@@ -978,9 +1379,11 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Perform one controlled squat',
-                        style: TextStyle(
+                      Text(
+                        widget.testType.isJumpTest
+                            ? _jumpInstruction(widget.testType)
+                            : 'Perform one controlled squat',
+                        style: const TextStyle(
                             color: Colors.white,
                             fontSize: 15,
                             fontWeight: FontWeight.w600),
@@ -1018,10 +1421,16 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
 
     switch (_state) {
       case AssessmentCameraState.setup:
-        label = _cameraReady ? 'Waiting for athlete…' : 'Initialising camera…';
+        if (!_cameraReady) {
+          label = AppLocalizations.get('loading_camera');
+        } else if (!_poseDetected) {
+          label = AppLocalizations.get('calibrating_pose');
+        } else {
+          label = AppLocalizations.get('full_body_visible');
+        }
         color = Colors.white38;
       case AssessmentCameraState.ready:
-        label = 'Ready';
+        label = AppLocalizations.get('status_ready_title');
         color = AppColors.primary;
       case AssessmentCameraState.countdown:
         label = 'Starting in $_countdown…';
@@ -1045,6 +1454,351 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
         child: Text(label,
             style: TextStyle(
                 color: color, fontSize: 14, fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
+
+  // ── Preparation Guide ─────────────────────────────────────────────────────
+
+  String _testObjective() {
+    return switch (widget.testType) {
+      AssessmentTestType.squat              => AppLocalizations.get('assessment_squat_objective'),
+      AssessmentTestType.countermovementJump => AppLocalizations.get('assessment_cmj_objective'),
+      AssessmentTestType.squatJump          => AppLocalizations.get('assessment_cmj_objective'),
+      AssessmentTestType.dropJump           => AppLocalizations.get('assessment_sldj_objective'),
+      AssessmentTestType.singleLegDropJump  => AppLocalizations.get('assessment_sldj_objective'),
+      AssessmentTestType.singleLegBalance   => AppLocalizations.get('assessment_slb_objective'),
+      AssessmentTestType.jumpLanding        => AppLocalizations.get('assessment_jl_objective'),
+    };
+  }
+
+  String _testInstructions() {
+    return switch (widget.testType) {
+      AssessmentTestType.squat              => AppLocalizations.get('assessment_squat_instructions'),
+      AssessmentTestType.countermovementJump => AppLocalizations.get('assessment_cmj_instructions'),
+      AssessmentTestType.squatJump          => AppLocalizations.get('assessment_cmj_instructions'),
+      AssessmentTestType.dropJump           => AppLocalizations.get('assessment_sldj_instructions'),
+      AssessmentTestType.singleLegDropJump  => AppLocalizations.get('assessment_sldj_instructions'),
+      AssessmentTestType.singleLegBalance   => AppLocalizations.get('assessment_slb_instructions'),
+      AssessmentTestType.jumpLanding        => AppLocalizations.get('assessment_jl_instructions'),
+    };
+  }
+
+  String _testSafetyTip() {
+    return switch (widget.testType) {
+      AssessmentTestType.squat              => AppLocalizations.get('assessment_squat_safety'),
+      AssessmentTestType.countermovementJump => AppLocalizations.get('assessment_cmj_safety'),
+      AssessmentTestType.squatJump          => AppLocalizations.get('assessment_cmj_safety'),
+      AssessmentTestType.dropJump           => AppLocalizations.get('assessment_sldj_safety'),
+      AssessmentTestType.singleLegDropJump  => AppLocalizations.get('assessment_sldj_safety'),
+      AssessmentTestType.singleLegBalance   => AppLocalizations.get('assessment_slb_safety'),
+      AssessmentTestType.jumpLanding        => AppLocalizations.get('assessment_jl_safety'),
+    };
+  }
+
+  bool get _isHighRiskTest =>
+      widget.testType == AssessmentTestType.singleLegDropJump ||
+      widget.testType == AssessmentTestType.dropJump;
+
+  Future<void> _showSafetyDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xff1A1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.health_and_safety_rounded, color: Colors.amber, size: 22),
+            const SizedBox(width: 8),
+            Text(
+              AppLocalizations.get('safety_dialog_title'),
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+        content: Text(
+          AppLocalizations.get('safety_dialog_body'),
+          style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              AppLocalizations.get('safety_no_pain'),
+              style: const TextStyle(color: Color(0xff2DBF6C), fontWeight: FontWeight.w700),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              AppLocalizations.get('safety_has_pain'),
+              style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (result == true) {
+      // No pain: proceed to camera selector
+      setState(() => _prepGuideShown = true);
+    } else {
+      // Has pain: show warning then let them choose
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xff1A1A2E),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.warning_rounded, color: Colors.red, size: 22),
+              const SizedBox(width: 8),
+              Text(
+                AppLocalizations.get('safety_screening_warning_title'),
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          content: Text(
+            AppLocalizations.get('safety_screening_warning_body'),
+            style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(
+                AppLocalizations.get('safety_go_back'),
+                style: const TextStyle(color: Colors.white54),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(
+                AppLocalizations.get('safety_warning_proceed'),
+                style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+      if (proceed == true) {
+        setState(() => _prepGuideShown = true);
+      }
+      // else: stay on prep guide
+    }
+  }
+
+  Widget _buildPrepGuide() {
+    final testName = widget.testType.displayName;
+    final objective = _testObjective();
+    final instructions = _testInstructions();
+    final safetyTip = _testSafetyTip();
+    final highRisk = _isHighRiskTest;
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Stack(
+        children: [
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.primary.withOpacity(0.4)),
+                          ),
+                          child: Text(
+                            AppLocalizations.get('prep_guide_title').toUpperCase(),
+                            style: const TextStyle(
+                              color: AppColors.primary,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.5,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        if (highRisk)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red.withOpacity(0.4)),
+                            ),
+                            child: Text(
+                              AppLocalizations.get('high_intensity_label').toUpperCase(),
+                              style: const TextStyle(color: Colors.red, fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      testName,
+                      style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      objective,
+                      style: const TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Camera setup checklist
+                    _prepSection(
+                      icon: Icons.videocam_rounded,
+                      color: AppColors.primary,
+                      title: AppLocalizations.get('calibration_guide_title'),
+                      items: [
+                        AppLocalizations.get('calibration_full_body_hint'),
+                        AppLocalizations.get('calibration_distance_hint'),
+                        AppLocalizations.get('calibration_lighting_hint'),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Instructions
+                    _prepSection(
+                      icon: Icons.format_list_numbered_rounded,
+                      color: Colors.amber,
+                      title: AppLocalizations.get('instruction_label'),
+                      body: instructions,
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Safety tip
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: (highRisk ? Colors.red : Colors.amber).withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: (highRisk ? Colors.red : Colors.amber).withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.shield_rounded,
+                              color: highRisk ? Colors.red : Colors.amber, size: 18),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              safetyTip,
+                              style: TextStyle(
+                                color: highRisk ? Colors.red.shade300 : Colors.amber.shade300,
+                                fontSize: 12,
+                                height: 1.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Actions
+                    GestureDetector(
+                      onTap: _showSafetyDialog,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 22),
+                            const SizedBox(width: 8),
+                            Text(
+                              AppLocalizations.get('prep_guide_btn'),
+                              style: const TextStyle(
+                                  color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 8, right: 8,
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white54),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ),
+        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _prepSection({
+    required IconData icon,
+    required Color color,
+    required String title,
+    List<String>? items,
+    String? body,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 16),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (body != null)
+            Text(body, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.6))
+          else if (items != null)
+            for (final item in items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.check_circle_rounded, color: color, size: 14),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(item, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ),
+                  ],
+                ),
+              ),
+        ],
       ),
     );
   }
@@ -1100,6 +1854,55 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
                       style: TextStyle(color: Colors.white30, fontSize: 11),
                       textAlign: TextAlign.center,
                     ),
+                    if (kIsWeb) ...[
+                      const SizedBox(height: 16),
+                      // ── Setup instructions (Arabic + English) ──────
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: AppColors.primary.withOpacity(0.3)),
+                        ),
+                        child: const Text(
+                          'ضع الهاتف على مسافة 2–3 متر\n'
+                          'اجعل الجسم كاملاً ظاهراً داخل الإطار\n'
+                          'استخدم إضاءة جيدة\n'
+                          'ثبّت الهاتف — لا تمسكه أثناء الاختبار\n\n'
+                          'Place phone 2–3 m away · full body visible\n'
+                          'Good lighting · keep phone stable',
+                          style: TextStyle(color: Colors.white60, fontSize: 11.5),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      // ── Browser recommendation ─────────────────────
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.04),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.info_outline,
+                                color: Colors.white24, size: 14),
+                            SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'Best results: Chrome on Android · Safari on iPhone · HTTPS required',
+                                style: TextStyle(
+                                    color: Colors.white30, fontSize: 10.5),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1183,6 +1986,102 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
     );
   }
 
+  Widget _buildCameraErrorScreen(_CameraFailureKind kind) {
+    final String titleKey;
+    final String bodyKey;
+    switch (kind) {
+      case _CameraFailureKind.permission:
+        titleKey = 'camera_error_permission_title';
+        bodyKey = 'camera_error_permission_body';
+        break;
+      case _CameraFailureKind.unsupported:
+        titleKey = 'camera_error_unsupported_title';
+        bodyKey = 'camera_error_unsupported_body';
+        break;
+      case _CameraFailureKind.runtime:
+        titleKey = 'camera_error_runtime_title';
+        bodyKey = 'camera_error_runtime_body';
+        break;
+      case _CameraFailureKind.initFailed:
+        titleKey = 'camera_error_init_title';
+        bodyKey = 'camera_error_init_body';
+        break;
+    }
+
+    // Retrying can't help when there's simply no camera hardware.
+    final canRetry = kind != _CameraFailureKind.unsupported;
+    // Settings only make sense for a permission denial, and only on
+    // platforms where permission_handler can deep-link into OS settings.
+    final canOpenSettings = kind == _CameraFailureKind.permission && !kIsWeb;
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.videocam_off, color: Colors.red, size: 64),
+                const SizedBox(height: 20),
+                Text(
+                  AppLocalizations.get(titleKey),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  AppLocalizations.get(bodyKey),
+                  style: const TextStyle(color: Colors.white54, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 28),
+                if (canRetry)
+                  ElevatedButton.icon(
+                    onPressed: _retryCameraInit,
+                    icon: const Icon(Icons.refresh),
+                    label: Text(AppLocalizations.get('camera_error_retry')),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.black,
+                    ),
+                  ),
+                if (canOpenSettings) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => openAppSettings(),
+                    icon: const Icon(Icons.settings, color: Colors.white70),
+                    label: Text(
+                      AppLocalizations.get('camera_error_open_settings'),
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.white24),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back, color: Colors.white54),
+                  label: Text(
+                    AppLocalizations.get('camera_error_go_back'),
+                    style: const TextStyle(color: Colors.white54),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildRotatePrompt() {
     return Scaffold(
       backgroundColor: Colors.black,
@@ -1212,7 +2111,57 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
     );
   }
 
+  Widget _buildJumpLiveDisplay() {
+    final state = _jumpStateMachine?.state ?? JumpState.searchingBody;
+    final (label, color, icon) = switch (state) {
+      JumpState.searchingBody => ('READY',      Colors.white54,        '◎'),
+      JumpState.positioning   => ('READY',      Colors.white54,        '◎'),
+      JumpState.stabilizing   => ('READY',      Colors.white54,        '◎'),
+      JumpState.ready         => ('READY',      Colors.white54,        '◎'),
+      JumpState.squatHold     => ('▼ CROUCH',   Colors.orangeAccent,   '▼'),
+      JumpState.takeoff       => ('↑ JUMP!',    AppColors.primary,     '↑'),
+      JumpState.airborne      => ('◆ AIRBORNE', Colors.lightBlueAccent,'◆'),
+      JumpState.landing       => ('▽ LAND',     Colors.amberAccent,    '▽'),
+      JumpState.completed     => ('✓ STABLE',   Colors.greenAccent,    '✓'),
+      JumpState.invalid       => ('⚠ LOST',     Colors.redAccent,      '⚠'),
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('$icon $label',
+            style: TextStyle(
+                color: color,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2)),
+        const SizedBox(height: 5),
+        Row(
+          children: [
+            const Text('Elevation ', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: LinearProgressIndicator(
+                  value: _jumpElevation,
+                  backgroundColor: Colors.white12,
+                  valueColor: AlwaysStoppedAnimation(
+                      Color.lerp(Colors.white54, Colors.lightBlueAccent, _jumpElevation)!),
+                  minHeight: 5,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text('${(_jumpElevation * 100).round()}%',
+                style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _buildLiveComparison() {
+    if (widget.testType.isJumpTest) return _buildJumpLiveDisplay();
     final lm = _displayLandmarks;
     if (lm.isEmpty) return const SizedBox.shrink();
 
@@ -1240,18 +2189,24 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
       children: [
         Row(
           children: [
-            Text(phaseLabel,
-                style: TextStyle(
-                    color: phaseColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2)),
+            Flexible(
+              child: Text(phaseLabel,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: phaseColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2)),
+            ),
             const SizedBox(width: 12),
-            Text('L: $lStr  R: $rStr',
-                style: const TextStyle(
-                    color: AppColors.primary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700)),
+            Flexible(
+              child: Text('L: $lStr  R: $rStr',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: AppColors.primary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700)),
+            ),
           ],
         ),
         const SizedBox(height: 5),
@@ -1278,6 +2233,60 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
         ),
       ],
     );
+  }
+
+  String _jumpInstruction(AssessmentTestType type) {
+    switch (type) {
+      case AssessmentTestType.countermovementJump:
+        return 'Dip down then jump as high as possible';
+      case AssessmentTestType.squatJump:
+        return 'Hold squat → jump explosively from static position';
+      case AssessmentTestType.dropJump:
+        return 'Step off box → land and immediately rebound';
+      case AssessmentTestType.singleLegDropJump:
+        return 'Single-leg landing → hold balance';
+      default:
+        return 'Perform the jump test';
+    }
+  }
+
+  void _updateJumpMetrics(PoseSnapshot snapshot, bool frameValid) {
+    final machine = _jumpStateMachine;
+    if (machine == null) return;
+
+    final lm = snapshot.landmarks;
+    final lh = lm['leftHip'], rh = lm['rightHip'];
+    final la = lm['leftAnkle'], ra = lm['rightAnkle'];
+    final hipY = (lh != null && rh != null)
+        ? (lh.dy + rh.dy) / 2
+        : (lh ?? rh)?.dy;
+
+    double? leftKneeAngle, rightKneeAngle;
+    final lk = lm['leftKnee'];
+    if (lh != null && lk != null && la != null) leftKneeAngle = _calcAngle(lh, lk, la);
+    final rk = lm['rightKnee'];
+    if (rh != null && rk != null && ra != null) rightKneeAngle = _calcAngle(rh, rk, ra);
+
+    final tsMs = snapshot.timestampMs > 0
+        ? snapshot.timestampMs
+        : DateTime.now().millisecondsSinceEpoch;
+
+    machine.update(
+      frameValid: frameValid,
+      hipY: hipY,
+      leftAnkleY: la?.dy,
+      rightAnkleY: ra?.dy,
+      leftKneeAngle: leftKneeAngle,
+      rightKneeAngle: rightKneeAngle,
+      tsMs: tsMs,
+    );
+
+    // Live elevation display: only meaningful once the baseline is frozen.
+    final baseline = machine.baselineHipY;
+    final leg = machine.legLength;
+    if (baseline != null && leg != null && leg > 0 && hipY != null) {
+      _jumpElevation = ((baseline - hipY) / leg).clamp(0.0, 1.0);
+    }
   }
 
   void _updateSquatMetrics() {
@@ -1314,14 +2323,11 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
     final depth = ((180 - avg) / 120.0).clamp(0.0, 1.0);
 
     // Rep-completion detection
-    if (avg < 130) _repDescended = true;
     if (avg < 100) _repBottomDone = true;
     if (_repBottomDone && avg > 158) {
       _framesAtReturn++;
       if (_framesAtReturn >= 4) {
-        _repCount++;
-        _repDescended  = false;
-        _repBottomDone = false;
+        _repBottomDone  = false;
         _framesAtReturn = 0;
       }
     } else if (avg <= 158) {
@@ -1345,30 +2351,123 @@ class _AssessmentCameraPageState extends State<AssessmentCameraPage> {
   }
 }
 
+/// Holds the last two smoothed poses and lerps between them so the skeleton
+/// overlay can be repainted at UI frame rate (via a [Ticker]) even though
+/// inference only produces a new pose every ~30-50ms. Jump tests only.
+class _SkeletonAnimator extends ChangeNotifier {
+  Map<String, Offset> _prevPoints = const {};
+  int _prevTsMs = 0;
+  Map<String, Offset> _latestPoints = const {};
+  int _latestTsMs = 0;
+  Rect? _prevBox;
+  Rect? _latestBox;
+
+  void push(Map<String, Offset> points, Rect? box, int tsMs) {
+    final effectiveTsMs = tsMs > 0 ? tsMs : DateTime.now().millisecondsSinceEpoch;
+    if (_latestTsMs == 0) {
+      // First frame: seed both prev and latest so there's nothing to lerp from.
+      _prevPoints = points;
+      _prevTsMs = effectiveTsMs;
+      _prevBox = box;
+    } else {
+      _prevPoints = _latestPoints;
+      _prevTsMs = _latestTsMs;
+      _prevBox = _latestBox;
+    }
+    _latestPoints = points;
+    _latestTsMs = effectiveTsMs;
+    _latestBox = box;
+  }
+
+  void tick() => notifyListeners();
+
+  void reset() {
+    _prevPoints = const {};
+    _prevTsMs = 0;
+    _latestPoints = const {};
+    _latestTsMs = 0;
+    _prevBox = null;
+    _latestBox = null;
+  }
+
+  Map<String, Offset> interpolated(int nowMs) {
+    if (_latestPoints.isEmpty) return _latestPoints;
+    if (_latestTsMs <= _prevTsMs) return _latestPoints;
+    final t = ((nowMs - _prevTsMs) / (_latestTsMs - _prevTsMs)).clamp(0.0, 1.0);
+    final result = <String, Offset>{};
+    for (final entry in _latestPoints.entries) {
+      final prev = _prevPoints[entry.key];
+      result[entry.key] = prev != null ? Offset.lerp(prev, entry.value, t)! : entry.value;
+    }
+    return result;
+  }
+
+  Rect? interpolatedBox(int nowMs) {
+    if (_latestBox == null) return null;
+    if (_prevBox == null || _latestTsMs <= _prevTsMs) return _latestBox;
+    final t = ((nowMs - _prevTsMs) / (_latestTsMs - _prevTsMs)).clamp(0.0, 1.0);
+    return Rect.lerp(_prevBox, _latestBox, t);
+  }
+}
+
+// Face/hand landmarks hidden from the overlay during jump tests to reduce
+// visual clutter — only the joints relevant to jump biomechanics matter.
+const _faceHandKeys = {
+  'nose', 'leftEyeInner', 'leftEye', 'leftEyeOuter',
+  'rightEyeInner', 'rightEye', 'rightEyeOuter',
+  'leftEar', 'rightEar', 'mouthLeft', 'mouthRight',
+  'leftPinky', 'rightPinky', 'leftIndex', 'rightIndex',
+  'leftThumb', 'rightThumb',
+};
+
 class _SquatSkeletonPainter extends CustomPainter {
-  const _SquatSkeletonPainter(
+  _SquatSkeletonPainter(
     this.pose,
     this.displayLandmarks, {
     this.rejectedFrames = 0,
     this.acceptedFrames = 0,
-  });
+    this.animator,
+    this.hideFacePoints = false,
+    this.medianLeftKneeAngle,
+    this.medianRightKneeAngle,
+    this.debugState,
+    this.lowerBodyQualityOverride,
+  }) : super(repaint: animator);
 
   final PoseSnapshot pose;
   // Smoothed landmarks used for rendering (may differ from pose.landmarks).
   final Map<String, Offset> displayLandmarks;
   final int rejectedFrames;
   final int acceptedFrames;
+  // When set (jump tests), paint() pulls interpolated points from the
+  // animator each tick instead of the static displayLandmarks snapshot.
+  final _SkeletonAnimator? animator;
+  final bool hideFacePoints;
+  // Jump tests: median-of-5 knee angles from JumpStateMachine, used for the
+  // on-screen L:/R: labels instead of a single noisy frame's raw angle
+  // (fixes glitch readings like "L: 9° R: 77°").
+  final double? medianLeftKneeAngle;
+  final double? medianRightKneeAngle;
+  // Jump-test state machine state name, shown in the kDebugMode label.
+  final String? debugState;
+  // Jump tests: PoseQualityGate.lowerBodyQuality (0..1) — the SAME number
+  // shown as "Lower Body: X%" in PoseDebugOverlay. Replaces the old
+  // landmark-COUNT heuristic, which could read legQ:100% while the feet
+  // were barely visible (present in the map at low likelihood is enough to
+  // count, but not enough to actually trust).
+  final double? lowerBodyQualityOverride;
 
   static const bool _debug = kDebugMode;
 
   Offset _toCanvas(Offset norm, Size canvas) =>
       Offset(norm.dx * canvas.width, norm.dy * canvas.height);
 
-  // Returns opacity [0.3, 1.0] scaled by how many lower-body landmarks are present.
-  double _lowerBodyOpacity() {
+  // Fallback for squat tests / web (no gate quality available): opacity
+  // scaled by how many lower-body landmarks are present.
+  double _lowerBodyOpacity(Map<String, Offset> points) {
     const keys = ['leftHip', 'rightHip', 'leftKnee', 'rightKnee',
                    'leftAnkle', 'rightAnkle'];
-    final count = keys.where(displayLandmarks.containsKey).length;
+    final count = keys.where(points.containsKey).length;
     if (count >= 5) return 1.0;
     if (count >= 3) return 0.55;
     return 0.25;
@@ -1376,10 +2475,16 @@ class _SquatSkeletonPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final pts =
-        displayLandmarks.map((k, v) => MapEntry(k, _toCanvas(v, size)));
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final sourcePoints = animator != null
+        ? animator!.interpolated(nowMs)
+        : displayLandmarks;
+    final points = hideFacePoints
+        ? (Map.of(sourcePoints)..removeWhere((k, _) => _faceHandKeys.contains(k)))
+        : sourcePoints;
+    final pts = points.map((k, v) => MapEntry(k, _toCanvas(v, size)));
 
-    final legOpacity = _lowerBodyOpacity();
+    final legOpacity = lowerBodyQualityOverride ?? _lowerBodyOpacity(points);
 
     // ── Bones ─────────────────────────────────────────────────────────────
     final bonePaint = Paint()
@@ -1455,8 +2560,15 @@ class _SquatSkeletonPainter extends CustomPainter {
 
     // ── Knee angle labels (only when lower body is confident) ─────────────
     if (legOpacity >= 0.55) {
-      _drawKneeAngle(canvas, pts, 'leftHip', 'leftKnee', 'leftAnkle', 'L');
-      _drawKneeAngle(canvas, pts, 'rightHip', 'rightKnee', 'rightAnkle', 'R');
+      if (medianLeftKneeAngle != null || medianRightKneeAngle != null) {
+        // Jump tests: use the state machine's median-of-5 angle, not a
+        // single noisy frame's raw angle.
+        _drawKneeAngleValue(canvas, pts['leftKnee'], medianLeftKneeAngle, 'L');
+        _drawKneeAngleValue(canvas, pts['rightKnee'], medianRightKneeAngle, 'R');
+      } else {
+        _drawKneeAngle(canvas, pts, 'leftHip', 'leftKnee', 'leftAnkle', 'L');
+        _drawKneeAngle(canvas, pts, 'rightHip', 'rightKnee', 'rightAnkle', 'R');
+      }
     }
 
     // ── Trunk lean ────────────────────────────────────────────────────────
@@ -1492,7 +2604,8 @@ class _SquatSkeletonPainter extends CustomPainter {
         'img:${pose.imageSize.width.round()}×${pose.imageSize.height.round()} '
         'lm:${pose.landmarkCount} '
         'ok:$acceptedFrames rej:$rejectedFrames '
-        'legQ:${(legOpacity * 100).round()}%',
+        'legQ:${(legOpacity * 100).round()}%'
+        '${debugState != null ? '\nstate:$debugState' : ''}',
         fontSize: 11,
         bold: false,
         color: Colors.yellow,
@@ -1522,6 +2635,12 @@ class _SquatSkeletonPainter extends CustomPainter {
     final angle = (math.acos((dot / mag).clamp(-1.0, 1.0)) * 180 / math.pi).round();
 
     _paintLabel(canvas, knee + const Offset(10, -10), '$side: $angle°',
+        fontSize: 13, bold: true, color: AppColors.primary);
+  }
+
+  void _drawKneeAngleValue(Canvas canvas, Offset? knee, double? angle, String side) {
+    if (knee == null || angle == null) return;
+    _paintLabel(canvas, knee + const Offset(10, -10), '$side: ${angle.round()}°',
         fontSize: 13, bold: true, color: AppColors.primary);
   }
 

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../app_colors.dart';
 import '../app_constants.dart';
 import '../app_localizations.dart';
 import '../models/onboard_slide.dart';
 import '../storage.dart';
-import '../widgets/looping_video_background.dart';
 import '../widgets/onboarding_widgets.dart';
 
 class OnboardingPage extends StatefulWidget {
@@ -18,7 +18,6 @@ class OnboardingPage extends StatefulWidget {
 class _OnboardingPageState extends State<OnboardingPage> {
   String? selectedLang;
   bool languageConfirmed = false;
-  bool showLanguageChooser = true;
   int slideIndex = 0;
 
   @override
@@ -43,24 +42,23 @@ class _OnboardingPageState extends State<OnboardingPage> {
     setAppLanguage(lang);
   }
 
-  static const neonGreen = Color(0xff39ff14);
-  static const darkBg = Color(0xff050508);
+  static const neonGreen = AppColors.primary;
 
   static const slides = [
     OnboardSlide(
-      image: 'assets/images/onboard-feature-1.png',
+      image: 'assets/images/onboard-feature-1.webp',
       titleKey: 'slide1_title',
       subtitleKey: 'slide1_desc',
       ctaKey: 'next_btn',
     ),
     OnboardSlide(
-      image: 'assets/images/onboard-feature-2.png',
+      image: 'assets/images/onboard-feature-2.webp',
       titleKey: 'slide2_title',
       subtitleKey: 'slide2_desc',
       ctaKey: 'next_btn',
     ),
     OnboardSlide(
-      image: 'assets/images/onboard-feature-3.png',
+      image: 'assets/images/onboard-feature-3.webp',
       titleKey: 'slide3_title',
       subtitleKey: 'slide3_desc',
       ctaKey: 'get_started_btn',
@@ -84,215 +82,276 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   Widget _buildLanguageScreen() {
     final isAr = selectedLang == 'ar';
-    final textStyle = isAr ? GoogleFonts.tajawal() : const TextStyle();
+    final textStyle = isAr ? GoogleFonts.cairo() : const TextStyle();
     final languages = [
-      (code: 'en', name: 'English', label: 'EN', icon: Icons.translate_rounded),
-      (code: 'ar', name: 'العربية', label: 'AR', icon: Icons.language_rounded),
-      (code: 'fr', name: 'Français', label: 'FR', icon: Icons.public_rounded),
+      (code: 'ar', name: 'العربية', subName: 'Arabic', label: 'AR'),
+      (code: 'en', name: 'English', subName: 'الإنجليزية', label: 'EN'),
+      (code: 'fr', name: 'Français', subName: 'الفرنسية', label: 'FR'),
     ];
 
-    return _buildVideoLanguageScreen(isAr, textStyle, languages);
-
-  }
-
-  Widget _buildVideoLanguageScreen(
-    bool isAr,
-    TextStyle textStyle,
-    List<
-      ({
-        String code,
-        String name,
-        String label,
-        IconData icon,
-      })
-    > languages,
-  ) {
     return Directionality(
       textDirection: isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        backgroundColor: darkBg,
-        body: Center(
+        backgroundColor: AppColors.background,
+        body: Stack(
+          children: [
+            // ── Language selection background ───────────────────────────
+            Positioned.fill(
+              child: Image.asset('assets/images/LANG-BG.webp', fit: BoxFit.cover),
+            ),
+          Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: maxPhoneWidth),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                const LoopingVideoBackground(
-                  asset: languageVideoAsset,
-                ),
-                Opacity(
-                  opacity: 0.10,
-                  child: CustomPaint(painter: GridPainter()),
-                ),
-                IgnorePointer(
-                  ignoring: !showLanguageChooser,
-                  child: AnimatedOpacity(
-                    opacity: showLanguageChooser ? 1 : 0,
-                    duration: const Duration(milliseconds: 650),
-                    curve: Curves.easeOutCubic,
-                    child: AnimatedSlide(
-                      offset: showLanguageChooser
-                          ? Offset.zero
-                          : const Offset(0, 0.04),
-                      duration: const Duration(milliseconds: 650),
-                      curve: Curves.easeOutCubic,
-                      child: SafeArea(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(24, 26, 24, 28),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 56,
-                                    height: 56,
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.62),
-                                      borderRadius: BorderRadius.circular(18),
-                                      border: Border.all(
-                                        color: neonGreen.withOpacity(0.70),
-                                        width: 1.2,
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: neonGreen.withOpacity(0.28),
-                                          blurRadius: 28,
-                                          spreadRadius: 1,
-                                        ),
-                                      ],
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(8.0),
-                                      child: Image.asset('logo.png'),
+            child: SafeArea(
+              child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ── Brand row ──────────────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF9B1020), AppColors.maroonDark],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: AppColors.primary.withOpacity(0.50),
+                              width: 1.5,
+                            ),
+                          ),
+                          padding: const EdgeInsets.all(9),
+                          child: Image.asset(logoAsset, fit: BoxFit.contain),
+                        ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: AppColors.card,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Text(
+                            AppLocalizations.get('club_brand_name'),
+                            style: textStyle.copyWith(
+                              color: AppColors.muted,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  // ── Card ──────────────────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
+                      decoration: BoxDecoration(
+                        color: AppColors.card,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: AppColors.border),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.10),
+                            blurRadius: 48,
+                            offset: const Offset(0, 16),
+                          ),
+                          BoxShadow(
+                            color: AppColors.maroon.withOpacity(0.06),
+                            blurRadius: 24,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            AppLocalizations.get('choose_language'),
+                            style: textStyle.copyWith(
+                              color: AppColors.foreground,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w900,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            AppLocalizations.get('language_desc'),
+                            style: textStyle.copyWith(
+                              color: AppColors.muted,
+                              fontSize: 13.5,
+                              height: 1.5,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          // ── Language options ───────────────────────────
+                          ...languages.map((lang) {
+                            final isSelected = selectedLang == lang.code;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: GestureDetector(
+                                onTap: () {
+                                  setState(() => selectedLang = lang.code);
+                                  setAppLanguage(lang.code);
+                                },
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 180),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? AppColors.background : AppColors.card,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: isSelected ? AppColors.foreground : AppColors.border,
+                                      width: isSelected ? 2.0 : 1.0,
                                     ),
                                   ),
-                                  const Spacer(),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 13,
-                                      vertical: 9,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.48),
-                                      borderRadius: BorderRadius.circular(999),
-                                      border: Border.all(
-                                        color: Colors.white.withOpacity(0.12),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 28,
+                                        height: 28,
+                                        decoration: BoxDecoration(
+                                          color: isSelected ? AppColors.hero : AppColors.surface2,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          lang.label,
+                                          style: TextStyle(
+                                            color: isSelected ? neonGreen : AppColors.muted,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                    child: Text(
-                                      'NextKick',
-                                      style: textStyle.copyWith(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: 0,
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              lang.name,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w800,
+                                                fontSize: 15,
+                                                color: AppColors.foreground,
+                                              ),
+                                            ),
+                                            Text(
+                                              lang.subName,
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                color: AppColors.muted,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
+                                      if (isSelected)
+                                        Container(
+                                          width: 24,
+                                          height: 24,
+                                          decoration: const BoxDecoration(
+                                            color: neonGreen,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.check_rounded,
+                                            color: AppColors.hero,
+                                            size: 14,
+                                          ),
+                                        )
+                                      else
+                                        Container(
+                                          width: 22,
+                                          height: 22,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            border: Border.all(color: AppColors.border, width: 1.5),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          }),
+                          const SizedBox(height: 8),
+                          // ── Continue button ────────────────────────────
+                          GestureDetector(
+                            onTap: () {
+                              if (selectedLang != null) {
+                                _saveLanguage(selectedLang!).then((_) {
+                                  if (!mounted) return;
+                                  setState(() => languageConfirmed = true);
+                                });
+                              }
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              height: 52,
+                              decoration: BoxDecoration(
+                                color: selectedLang != null
+                                    ? AppColors.primary
+                                    : AppColors.surface2,
+                                borderRadius: BorderRadius.circular(18),
+                                boxShadow: selectedLang != null ? [
+                                  BoxShadow(
+                                    color: AppColors.primary.withOpacity(0.38),
+                                    blurRadius: 16,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ] : [],
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    AppLocalizations.get('continue_btn'),
+                                    style: textStyle.copyWith(
+                                      color: selectedLang != null
+                                          ? const Color(0xFF1A1A1A)
+                                          : AppColors.muted,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
                                     ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Icon(
+                                    Icons.arrow_forward_rounded,
+                                    color: selectedLang != null
+                                        ? const Color(0xFF1A1A1A)
+                                        : AppColors.muted,
+                                    size: 18,
                                   ),
                                 ],
                               ),
-                              const Spacer(),
-                              Container(
-                                padding: const EdgeInsets.all(18),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.58),
-                                  borderRadius: BorderRadius.circular(26),
-                                  border: Border.all(
-                                    color: Colors.white.withOpacity(0.12),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.46),
-                                      blurRadius: 42,
-                                      offset: const Offset(0, 18),
-                                    ),
-                                    BoxShadow(
-                                      color: neonGreen.withOpacity(0.10),
-                                      blurRadius: 36,
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      AppLocalizations.get('choose_language'),
-                                      textAlign: TextAlign.start,
-                                      style: textStyle.copyWith(
-                                        fontSize: 30,
-                                        fontWeight: FontWeight.w900,
-                                        color: Colors.white,
-                                        height: 1.08,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Text(
-                                      AppLocalizations.get('language_desc'),
-                                      textAlign: TextAlign.start,
-                                      style: textStyle.copyWith(
-                                        fontSize: 14,
-                                        color: Colors.white.withOpacity(0.70),
-                                        height: 1.5,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 20),
-                                    ...languages.map((lang) {
-                                      final isSelected =
-                                          selectedLang == lang.code;
-                                      return Padding(
-                                        padding:
-                                            const EdgeInsets.only(bottom: 10),
-                                        child: LanguageOptionTile(
-                                          name: lang.name,
-                                          label: lang.label,
-                                          icon: lang.icon,
-                                          selected: isSelected,
-                                          textStyle: lang.code == 'ar'
-                                              ? GoogleFonts.tajawal()
-                                              : const TextStyle(),
-                                          onTap: () {
-                                            setState(
-                                              () => selectedLang = lang.code,
-                                            );
-                                            setAppLanguage(lang.code);
-                                          },
-                                        ),
-                                      );
-                                    }),
-                                    const SizedBox(height: 12),
-                                    LanguageContinueButton(
-                                      enabled: selectedLang != null,
-                                      text: AppLocalizations.get(
-                                        'continue_btn',
-                                      ),
-                                      textStyle: textStyle,
-                                      onTap: () {
-                                        if (selectedLang != null) {
-                                          _saveLanguage(selectedLang!).then((_) {
-                                            if (!mounted) return;
-                                            setState(
-                                              () => languageConfirmed = true,
-                                            );
-                                          });
-                                        }
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
+          ),
+          ),
+          ],
         ),
       ),
     );
@@ -305,30 +364,24 @@ class _OnboardingPageState extends State<OnboardingPage> {
         .clamp(420.0, 620.0)
         .toDouble();
     final isAr = getAppLanguage() == 'ar';
-    final textStyle = isAr ? GoogleFonts.tajawal() : const TextStyle();
+    final textStyle = isAr ? GoogleFonts.cairo() : const TextStyle();
 
     return Directionality(
       textDirection: isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF0EEE7),
+        backgroundColor: AppColors.background,
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: maxPhoneWidth),
             child: Column(
               children: [
+                // ── Full-bleed image section ─────────────────────────────
                 GestureDetector(
                   onHorizontalDragEnd: (details) {
-                    // Swipe right to go back
                     if (details.velocity.pixelsPerSecond.dx > 300) {
-                      if (slideIndex > 0) {
-                        setState(() => slideIndex--);
-                      }
-                    }
-                    // Swipe left to go next
-                    else if (details.velocity.pixelsPerSecond.dx < -300) {
-                      if (slideIndex < 2) {
-                        setState(() => slideIndex++);
-                      }
+                      if (slideIndex > 0) setState(() => slideIndex--);
+                    } else if (details.velocity.pixelsPerSecond.dx < -300) {
+                      if (slideIndex < 2) setState(() => slideIndex++);
                     }
                   },
                   child: SizedBox(
@@ -343,28 +396,70 @@ class _OnboardingPageState extends State<OnboardingPage> {
                             asset: slide.image,
                           ),
                         ),
-                        // Bottom fade
+                        // Gradient: transparent → cream (matching design)
                         Container(
-                          decoration: const BoxDecoration(
+                          decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Color(0xFFF0EEE7)],
-                              stops: [0.6, 1],
+                              colors: [Colors.transparent, AppColors.background],
+                              stops: const [0.48, 1.0],
                             ),
+                          ),
+                        ),
+                        // Slide kicker label
+                        Positioned(
+                          top: 14,
+                          left: 20,
+                          right: 20,
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.50),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.18),
+                                  ),
+                                ),
+                                child: Text(
+                                  '0${slideIndex + 1}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.08,
+                                  ),
+                                ),
+                              ),
+                              const Spacer(),
+                              if (!isLast)
+                                GestureDetector(
+                                  onTap: finish,
+                                  child: const Text(
+                                    'تخطّي',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
+                // ── Content section (cream bg) ───────────────────────────
                 Expanded(
                   child: SingleChildScrollView(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(32, 22, 32, 36),
+                      padding: const EdgeInsets.fromLTRB(28, 8, 28, 32),
                       child: Column(
                         children: [
-                          const SizedBox(height: 20),
                           AnimatedSwitcher(
                             duration: const Duration(milliseconds: 350),
                             child: Column(
@@ -376,26 +471,25 @@ class _OnboardingPageState extends State<OnboardingPage> {
                                   style: textStyle.copyWith(
                                     fontSize: isAr ? 25 : 24,
                                     fontWeight: FontWeight.w800,
-                                    color: const Color(0xff0a0a0a),
-                                    height: 1.2,
-                                    letterSpacing: 0,
+                                    color: AppColors.foreground,
+                                    height: 1.18,
                                   ),
                                 ),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 10),
                                 Text(
                                   AppLocalizations.get(slide.subtitleKey),
                                   textAlign: TextAlign.center,
                                   style: textStyle.copyWith(
-                                    fontSize: 15,
-                                    color: const Color(0xff666666),
-                                    height: 1.65,
+                                    fontSize: 14.5,
+                                    color: AppColors.muted,
+                                    height: 1.6,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          const SizedBox(height: 40),
-                          // Dots
+                          const SizedBox(height: 28),
+                          // ── Page dots ──────────────────────────────────
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: List.generate(3, (i) {
@@ -406,51 +500,34 @@ class _OnboardingPageState extends State<OnboardingPage> {
                                   duration: const Duration(milliseconds: 300),
                                   width: active ? 28 : 8,
                                   height: 8,
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                  ),
+                                  margin: const EdgeInsets.symmetric(horizontal: 3.5),
                                   decoration: BoxDecoration(
-                                    color: active
-                                        ? neonGreen
-                                        : const Color(0xffc8f5b0),
+                                    color: active ? neonGreen : AppColors.border,
                                     borderRadius: BorderRadius.circular(4),
-                                    boxShadow: active
-                                        ? [
-                                            BoxShadow(
-                                              color: neonGreen.withOpacity(0.6),
-                                              blurRadius: 8,
-                                            ),
-                                          ]
-                                        : [],
                                   ),
                                 ),
                               );
                             }),
                           ),
-                          const SizedBox(height: 28),
+                          const SizedBox(height: 22),
+                          // ── CTA button ─────────────────────────────────
                           GestureDetector(
                             onTap: () {
-                              if (isLast) {
-                                finish();
-                              } else {
-                                setState(() => slideIndex++);
-                              }
+                              if (isLast) finish();
+                              else setState(() => slideIndex++);
                             },
                             child: Container(
                               width: double.infinity,
-                              height: 56,
+                              height: 54,
                               decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [neonGreen, Color(0xff20cc00)],
-                                ),
-                                borderRadius: BorderRadius.circular(28),
+                                color: isLast ? neonGreen : AppColors.maroon,
+                                borderRadius: BorderRadius.circular(18),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: neonGreen.withOpacity(0.45),
-                                    blurRadius: 28,
-                                    offset: const Offset(0, 8),
+                                    color: (isLast ? AppColors.primary : AppColors.maroon)
+                                        .withOpacity(0.35),
+                                    blurRadius: 14,
+                                    offset: const Offset(0, 4),
                                   ),
                                 ],
                               ),
@@ -458,15 +535,27 @@ class _OnboardingPageState extends State<OnboardingPage> {
                                 child: Text(
                                   AppLocalizations.get(slide.ctaKey),
                                   style: textStyle.copyWith(
-                                    fontSize: isAr ? 19 : 17,
+                                    fontSize: isAr ? 18 : 16,
                                     fontWeight: FontWeight.w800,
-                                    color: Colors.black,
+                                    color: isLast ? const Color(0xFF1A1A1A) : AppColors.onDark,
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 14),
+                          // ── Login shortcut — always visible, every slide ──
+                          GestureDetector(
+                            onTap: finish,
+                            child: Text(
+                              AppLocalizations.get('already_have_account_login'),
+                              style: textStyle.copyWith(
+                                color: AppColors.muted,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),

@@ -207,6 +207,9 @@ function rptPlayerSummary(
     $since30 = $customRange ? "$from 00:00:00" : date('Y-m-d H:i:s', strtotime('-30 days'));
     $since7  = $customRange ? "$from 00:00:00" : date('Y-m-d H:i:s', strtotime('-7 days'));
     $until   = $customRange ? "$to 23:59:59"   : null;
+    $periodDays = $customRange
+        ? ((new DateTimeImmutable($from))->diff(new DateTimeImmutable($to))->days + 1)
+        : 7;
 
     // Completion rate
     $stmt = $pdo->prepare(
@@ -271,7 +274,12 @@ function rptPlayerSummary(
         'completion_rate_30d'   => $total > 0 ? round($done / $total * 100) : 0,
         'average_hooper_30d'    => $avgHooper,
         'average_post_rpe_30d'  => $avgRpe,
-        'training_load_7d'      => $load7d,
+        // Keep the legacy 7-day field only for the default 7-day summary.
+        // Custom ranges use the explicit period field so they cannot be
+        // displayed as 7-day load.
+        'training_load_7d'      => $customRange ? null : $load7d,
+        'training_load_period'  => $load7d,
+        'training_load_period_days' => $periodDays,
         'pain_reports_30d'      => $painCount,
         'best_assessment_score' => $bestScore,
     ];

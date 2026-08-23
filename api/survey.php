@@ -244,9 +244,10 @@ if ($method === 'POST') {
                 error_log('[survey] hooper bridge OK — score=' . $hooScore);
 
             } elseif ($responseType === 'post') {
-                $rpeScore = isset($responses['rpe']) ? min(10, max(1, (int)$responses['rpe'])) : null;
+                $rpeScore = isset($responses['rpe']) ? min(10, max(0, (int)$responses['rpe'])) : null;
                 if ($rpeScore !== null) {
-                    $painReported = isset($responses['pain']) && (int)$responses['pain'] >= 3 ? 1 : 0;
+                    // 'pain' is now the app's yes/no toggle (0/1), not a 1–5 severity scale.
+                    $painReported = !empty($responses['pain']) ? 1 : 0;
                     $load         = $rpeScore * $durMinutes;
 
                     error_log("[survey] rpe bridge: user=$userId player=$playerId"

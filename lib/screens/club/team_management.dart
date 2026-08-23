@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../app_colors.dart';
+import '../../app_localizations.dart';
+import '../../app_state.dart';
 import '../../models/club_models.dart';
 import '../../services/club_service.dart';
+import '../../shared/club_ui_tokens.dart';
+import '../../widgets/common_widgets.dart';
 import 'club_dashboard.dart';
+import 'club_widgets.dart';
 
 class TeamManagementPage extends StatefulWidget {
   const TeamManagementPage({super.key});
@@ -33,78 +38,53 @@ class _TeamManagementPageState extends State<TeamManagementPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!canManageTeams) return const RoleAccessDeniedPage();
     return ClubShell(
       currentIndex: 0,
       child: Column(
         children: [
-          Container(
-            padding: EdgeInsets.fromLTRB(
-                20, MediaQuery.of(context).padding.top + 16, 20, 16),
-            decoration: const BoxDecoration(
-              color: AppColors.card,
-              border: Border(bottom: BorderSide(color: AppColors.border, width: 0.8)),
+          ClubAppHeader(
+            title: AppLocalizations.get('team_management'),
+            leading: GestureDetector(
+              onTap: () => Navigator.of(context).pop(),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppColors.surface2,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: const Icon(Icons.arrow_back_rounded,
+                    color: AppColors.foreground, size: 18),
+              ),
             ),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: () => Navigator.of(context).pop(),
-                  child: Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: AppColors.surface2,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: const Icon(Icons.arrow_back_rounded,
-                        color: Colors.white, size: 18),
-                  ),
+            trailing: GestureDetector(
+              onTap: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AddEditTeamPage()),
+                );
+                _load();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(ClubUiTokens.buttonRadius - 2),
                 ),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Text(
-                    'Team Management',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 20,
-                    ),
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.add_rounded, color: AppColors.foreground, size: 18),
+                    const SizedBox(width: 6),
+                    Text(AppLocalizations.get('add'),
+                        style: const TextStyle(
+                            color: AppColors.foreground,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13)),
+                  ],
                 ),
-                GestureDetector(
-                  onTap: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const AddEditTeamPage()),
-                    );
-                    _load();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                            color: AppColors.primary.withOpacity(0.30),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4)),
-                      ],
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.add_rounded, color: Colors.white, size: 18),
-                        SizedBox(width: 6),
-                        Text('Add',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 13)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
           Expanded(
@@ -112,70 +92,16 @@ class _TeamManagementPageState extends State<TeamManagementPage> {
                 ? const Center(
                     child: CircularProgressIndicator(color: AppColors.primary))
                 : _teams.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 72,
-                              height: 72,
-                              decoration: BoxDecoration(
-                                color: AppColors.primarySoft,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.groups_rounded,
-                                  color: AppColors.primary, size: 36),
-                            ),
-                            const SizedBox(height: 16),
-                            const Text(
-                              'No Teams Yet',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 18),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Create your first team to get started',
-                              style: TextStyle(
-                                  color: Colors.white.withOpacity(0.5),
-                                  fontSize: 13),
-                            ),
-                            const SizedBox(height: 24),
-                            GestureDetector(
-                              onTap: () async {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                      builder: (_) => const AddEditTeamPage()),
-                                );
-                                _load();
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 28, vertical: 14),
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary,
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppColors.primary.withOpacity(0.30),
-                                      blurRadius: 20,
-                                      offset: const Offset(0, 8),
-                                    ),
-                                  ],
-                                ),
-                                child: const Text(
-                                  'Create Team',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w900,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                    ? ClubEmptyState(
+                        icon: Icons.groups_rounded,
+                        title: AppLocalizations.get('no_teams_yet'),
+                        description: AppLocalizations.get('create_first_team_hint'),
+                        ctaLabel: AppLocalizations.get('create_team'),
+                        onCta: () async {
+                          await Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const AddEditTeamPage()));
+                          _load();
+                        },
                       )
                     : RefreshIndicator(
                         color: AppColors.primary,
@@ -187,293 +113,20 @@ class _TeamManagementPageState extends State<TeamManagementPage> {
                           separatorBuilder: (_, __) => const SizedBox(height: 12),
                           itemBuilder: (_, i) {
                             final team = _teams[i];
-                            return GestureDetector(
-                              onTap: () => Navigator.of(context).pushNamed(
-                                  '/club/players',
-                                  arguments: {'teamId': team.id}),
-                              child: Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: AppColors.card,
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: AppColors.border),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppColors.primary.withOpacity(0.05),
-                                      blurRadius: 16,
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(
-                                          width: 50,
-                                          height: 50,
-                                          decoration: BoxDecoration(
-                                            color: AppColors.primarySoft,
-                                            borderRadius:
-                                                BorderRadius.circular(14),
-                                            border: Border.all(
-                                                color: AppColors.primary
-                                                    .withOpacity(0.30),
-                                                width: 1.5),
-                                          ),
-                                          child: const Icon(
-                                              Icons.shield_rounded,
-                                              color: AppColors.primary,
-                                              size: 26),
-                                        ),
-                                        const SizedBox(width: 14),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                team.name,
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w900,
-                                                  fontSize: 16,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 3),
-                                              Row(
-                                                children: [
-                                                  Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 3),
-                                                    decoration: BoxDecoration(
-                                                      color: AppColors.primary
-                                                          .withOpacity(0.12),
-                                                      borderRadius:
-                                                          BorderRadius
-                                                              .circular(8),
-                                                      border: Border.all(
-                                                          color: AppColors
-                                                              .primary
-                                                              .withOpacity(
-                                                                  0.25)),
-                                                    ),
-                                                    child: Text(
-                                                      team.category.label,
-                                                      style: TextStyle(
-                                                        color:
-                                                            AppColors.primary,
-                                                        fontWeight:
-                                                            FontWeight.w800,
-                                                        fontSize: 10,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 3),
-                                                    decoration: BoxDecoration(
-                                                      color: AppColors.gold
-                                                          .withOpacity(0.12),
-                                                      borderRadius:
-                                                          BorderRadius
-                                                              .circular(8),
-                                                      border: Border.all(
-                                                          color: AppColors
-                                                              .gold
-                                                              .withOpacity(
-                                                                  0.25)),
-                                                    ),
-                                                    child: Text(
-                                                      team.season,
-                                                      style: TextStyle(
-                                                        color:
-                                                            AppColors.gold,
-                                                        fontWeight:
-                                                            FontWeight.w800,
-                                                        fontSize: 10,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        PopupMenuButton<String>(
-                                          color: AppColors.card,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(14),
-                                            side: const BorderSide(
-                                                color: AppColors.border),
-                                          ),
-                                          onSelected: (v) {
-                                            if (v == 'edit') {
-                                              Navigator.of(context)
-                                                  .push(MaterialPageRoute(
-                                                builder: (_) =>
-                                                    AddEditTeamPage(team: team),
-                                              ))
-                                                  .then((_) => _load());
-                                            }
-                                            if (v == 'delete') {
-                                              _showDeleteConfirm(team);
-                                            }
-                                          },
-                                          itemBuilder: (_) => [
-                                            const PopupMenuItem(
-                                              value: 'edit',
-                                              child: Row(children: [
-                                                Icon(Icons.edit_rounded,
-                                                    color: AppColors.primary,
-                                                    size: 18),
-                                                SizedBox(width: 10),
-                                                Text('Edit',
-                                                    style: TextStyle(
-                                                        color: Colors.white)),
-                                              ]),
-                                            ),
-                                            const PopupMenuItem(
-                                              value: 'delete',
-                                              child: Row(children: [
-                                                Icon(Icons.delete_rounded,
-                                                    color: AppColors.destructive,
-                                                    size: 18),
-                                                SizedBox(width: 10),
-                                                Text('Delete',
-                                                    style: TextStyle(
-                                                        color: AppColors
-                                                            .destructive)),
-                                              ]),
-                                            ),
-                                          ],
-                                          child: const Icon(
-                                              Icons.more_vert_rounded,
-                                              color: AppColors.muted,
-                                              size: 22),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 14),
-                                    const Divider(
-                                        color: AppColors.border, height: 1),
-                                    const SizedBox(height: 14),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  Icon(Icons.people_rounded,
-                                                      size: 12,
-                                                      color: AppColors.muted),
-                                                  const SizedBox(width: 4),
-                                                  Text('Players',
-                                                      style: TextStyle(
-                                                          color: Colors.white
-                                                              .withOpacity(
-                                                                  0.40),
-                                                          fontSize: 10)),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                '${team.playerCount}',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w700,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  Icon(Icons.person_rounded,
-                                                      size: 12,
-                                                      color: AppColors.muted),
-                                                  const SizedBox(width: 4),
-                                                  Text('Coach',
-                                                      style: TextStyle(
-                                                          color: Colors.white
-                                                              .withOpacity(
-                                                                  0.40),
-                                                          fontSize: 10)),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                team.coachName.isNotEmpty
-                                                    ? team.coachName
-                                                    : '—',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w700,
-                                                  fontSize: 12,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  Icon(
-                                                      Icons
-                                                          .fitness_center_rounded,
-                                                      size: 12,
-                                                      color: AppColors.muted),
-                                                  const SizedBox(width: 4),
-                                                  Text('Physical Coach',
-                                                      style: TextStyle(
-                                                          color: Colors.white
-                                                              .withOpacity(
-                                                                  0.40),
-                                                          fontSize: 10)),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                team.physicalCoachName
-                                                        .isNotEmpty
-                                                    ? team.physicalCoachName
-                                                    : '—',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w700,
-                                                  fontSize: 12,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
+                            return _TeamCard(
+                              team: team,
+                              onTap: () {
+                                currentTeamId = team.id;
+                                currentTeamName = team.name;
+                                Navigator.of(context).pushNamed(
+                                    '/club/players',
+                                    arguments: {'teamId': team.id});
+                              },
+                              onEdit: () => Navigator.of(context)
+                                  .push(MaterialPageRoute(
+                                      builder: (_) => AddEditTeamPage(team: team)))
+                                  .then((_) => _load()),
+                              onDelete: () => _showDeleteConfirm(team),
                             );
                           },
                         ),
@@ -484,36 +137,206 @@ class _TeamManagementPageState extends State<TeamManagementPage> {
     );
   }
 
-  void _showDeleteConfirm(ClubTeam team) {
-    showDialog(
+  Future<void> _showDeleteConfirm(ClubTeam team) async {
+    final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.card,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: const BorderSide(color: AppColors.border),
+      builder: (_) => ClubConfirmDialog(
+        title: AppLocalizations.get('delete_team_title'),
+        body: AppLocalizations.format('delete_team_msg', {'name': team.name}),
+      ),
+    );
+    if (ok == true) {
+      final deleted = await ClubService().deleteTeam(team.id);
+      if (!mounted) return;
+      if (deleted) {
+        await _load();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppLocalizations.get('error_generic'))),
+        );
+      }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Team Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TeamCard extends StatelessWidget {
+  const _TeamCard({
+    required this.team,
+    required this.onTap,
+    required this.onEdit,
+    required this.onDelete,
+  });
+  final ClubTeam team;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(ClubUiTokens.cardRadius),
+          border: Border.all(color: AppColors.border, width: 0.8),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2)),
+          ],
         ),
-        title: const Text('Delete Team',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-        content: Text('Are you sure you want to delete "${team.name}"?',
-            style: TextStyle(color: Colors.white.withOpacity(0.65))),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel',
-                style: TextStyle(color: Colors.white.withOpacity(0.55))),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(ClubUiTokens.cardRadius - 0.8),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 34, 14),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySoft,
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: const Icon(Icons.shield_rounded,
+                          color: AppColors.maroon, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            team.name,
+                            style: const TextStyle(
+                              color: AppColors.foreground,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Row(children: [
+                            ClubStatusBadge(
+                                label: team.category.label, color: AppColors.maroon),
+                            const SizedBox(width: 6),
+                            ClubStatusBadge(label: team.season, color: AppColors.primary),
+                          ]),
+                          const SizedBox(height: 10),
+                          Row(children: [
+                            _TeamStat(
+                                icon: Icons.people_rounded,
+                                label: AppLocalizations.get('players_title'),
+                                value: '${team.playerCount}'),
+                            const SizedBox(width: 16),
+                            _TeamStat(
+                                icon: Icons.person_rounded,
+                                label: AppLocalizations.get('coach_label'),
+                                value: team.coachName.isNotEmpty
+                                    ? team.coachName
+                                    : '—'),
+                            const SizedBox(width: 16),
+                            _TeamStat(
+                                icon: Icons.fitness_center_rounded,
+                                label: AppLocalizations.get('physical_coach_label'),
+                                value: team.physicalCoachName.isNotEmpty
+                                    ? team.physicalCoachName
+                                    : '—'),
+                          ]),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: 2,
+                right: 2,
+                child: PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert_rounded,
+                      color: AppColors.muted, size: 18),
+                  color: AppColors.card,
+                  elevation: 4,
+                  shape:
+                      RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  onSelected: (v) {
+                    if (v == 'edit') onEdit();
+                    if (v == 'delete') onDelete();
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: 'edit',
+                      height: 42,
+                      child: Row(children: [
+                        const Icon(Icons.edit_rounded,
+                            color: AppColors.primary, size: 16),
+                        const SizedBox(width: 10),
+                        Text(AppLocalizations.get('edit_btn'),
+                            style: const TextStyle(color: AppColors.foreground)),
+                      ]),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      height: 42,
+                      child: Row(children: [
+                        const Icon(Icons.delete_rounded,
+                            color: AppColors.destructive, size: 16),
+                        const SizedBox(width: 10),
+                        Text(AppLocalizations.get('delete'),
+                            style: const TextStyle(color: AppColors.destructive)),
+                      ]),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () async {
-              Navigator.of(context).pop();
-              await ClubService().deleteTeam(team.id);
-              _load();
-            },
-            child: const Text('Delete',
-                style: TextStyle(
-                    color: AppColors.destructive,
-                    fontWeight: FontWeight.w800)),
-          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TeamStat extends StatelessWidget {
+  const _TeamStat({required this.icon, required this.label, required this.value});
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(icon, size: 11, color: AppColors.muted),
+            const SizedBox(width: 3),
+            Expanded(
+              child: Text(label,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 9.5),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ),
+          ]),
+          const SizedBox(height: 2),
+          Text(value,
+              style: const TextStyle(
+                  color: AppColors.foreground,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11.5),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
         ],
       ),
     );
@@ -568,19 +391,26 @@ class _AddEditTeamPageState extends State<AddEditTeamPage> {
   Future<void> _save() async {
     if (_name.text.trim().isEmpty) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Team name is required')));
+          .showSnackBar(SnackBar(content: Text(AppLocalizations.get('team_name_required'))));
       return;
     }
     setState(() => _saving = true);
+    bool saved;
     if (_isEdit) {
       final t = widget.team!;
-      t.name = _name.text.trim();
-      t.category = _category;
-      t.coachName = _coach.text.trim();
-      t.physicalCoachName = _physCoach.text.trim();
-      t.season = _season.text.trim();
-      t.notes = _notes.text.trim();
-      await ClubService().updateTeam(t);
+      final updatedTeam = ClubTeam(
+        id: t.id,
+        name: _name.text.trim(),
+        category: _category,
+        coachName: _coach.text.trim(),
+        physicalCoachName: _physCoach.text.trim(),
+        season: _season.text.trim(),
+        logoUrl: t.logoUrl,
+        notes: _notes.text.trim(),
+        playerIds: List<String>.from(t.playerIds),
+        createdAt: t.createdAt,
+      );
+      saved = await ClubService().updateTeam(updatedTeam);
     } else {
       final team = ClubTeam(
         id: '',
@@ -592,11 +422,17 @@ class _AddEditTeamPageState extends State<AddEditTeamPage> {
         notes: _notes.text.trim(),
         createdAt: DateTime.now(),
       );
-      await ClubService().addTeam(team);
+      saved = await ClubService().addTeam(team) != null;
     }
     if (!mounted) return;
     setState(() => _saving = false);
-    Navigator.of(context).pop();
+    if (saved) {
+      Navigator.of(context).pop(true);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLocalizations.get('save_failed'))),
+      );
+    }
   }
 
   @override
@@ -606,318 +442,55 @@ class _AddEditTeamPageState extends State<AddEditTeamPage> {
       body: SafeArea(
         child: Column(
           children: [
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-              decoration: const BoxDecoration(
-                color: AppColors.card,
-                border:
-                    Border(bottom: BorderSide(color: AppColors.border, width: 0.8)),
-              ),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: AppColors.surface2,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: const Icon(Icons.close_rounded,
-                          color: Colors.white, size: 18),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                        _isEdit ? 'Edit Team' : 'New Team',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 18)),
-                  ),
-                  GestureDetector(
-                    onTap: _saving ? null : _save,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                              color: AppColors.primary.withOpacity(0.30),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4)),
-                        ],
-                      ),
-                      child: _saving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : const Text('Save',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 14)),
-                    ),
-                  ),
-                ],
-              ),
+            ClubFormHeader(
+              title: _isEdit
+                  ? AppLocalizations.get('edit_team')
+                  : AppLocalizations.get('new_team'),
+              onBack: () => Navigator.of(context).pop(),
+              onSave: _saving ? null : _save,
+              saving: _saving,
             ),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(ClubUiTokens.pageHorizontalPadding),
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Team Name',
-                          style: TextStyle(
-                              color: Colors.white.withOpacity(0.65),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12)),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _name,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: InputDecoration(
-                          hintText: 'e.g. Al Merrikh First Team',
-                          hintStyle: TextStyle(
-                              color: Colors.white.withOpacity(0.30),
-                              fontSize: 14),
-                          filled: true,
-                          fillColor: AppColors.surface2,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: const BorderSide(
-                                color: AppColors.primary, width: 1.5),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 14),
-                        ),
-                      ),
-                    ],
+                  ClubFormField(
+                    controller: _name,
+                    label: AppLocalizations.get('team_name_label'),
+                    hint: AppLocalizations.get('team_name_example'),
                   ),
-                  const SizedBox(height: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Category',
-                          style: TextStyle(
-                              color: Colors.white.withOpacity(0.65),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12)),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface2,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: DropdownButton<TeamCategory>(
-                          value: _category,
-                          isExpanded: true,
-                          dropdownColor: AppColors.card,
-                          underline: const SizedBox(),
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 14),
-                          items: TeamCategory.values
-                              .map((e) => DropdownMenuItem(
-                                    value: e,
-                                    child: Text(e.label),
-                                  ))
-                              .toList(),
-                          onChanged: (v) =>
-                              setState(() => _category = v!),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: ClubUiTokens.spacingLg),
+                  ClubDropdownField<TeamCategory>(
+                    label: AppLocalizations.get('category_label'),
+                    value: _category,
+                    items: TeamCategory.values,
+                    labelOf: (e) => e.label,
+                    onChanged: (v) => setState(() => _category = v!),
                   ),
-                  const SizedBox(height: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Season',
-                          style: TextStyle(
-                              color: Colors.white.withOpacity(0.65),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12)),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _season,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: InputDecoration(
-                          hintText: '2024/2025',
-                          hintStyle: TextStyle(
-                              color: Colors.white.withOpacity(0.30),
-                              fontSize: 14),
-                          filled: true,
-                          fillColor: AppColors.surface2,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: const BorderSide(
-                                color: AppColors.primary, width: 1.5),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 14),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: ClubUiTokens.spacingLg),
+                  ClubFormField(
+                    controller: _season,
+                    label: AppLocalizations.get('season_label'),
+                    hint: '2024/2025',
                   ),
-                  const SizedBox(height: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Head Coach',
-                          style: TextStyle(
-                              color: Colors.white.withOpacity(0.65),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12)),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _coach,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: InputDecoration(
-                          hintText: 'Coach name',
-                          hintStyle: TextStyle(
-                              color: Colors.white.withOpacity(0.30),
-                              fontSize: 14),
-                          filled: true,
-                          fillColor: AppColors.surface2,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: const BorderSide(
-                                color: AppColors.primary, width: 1.5),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 14),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: ClubUiTokens.spacingLg),
+                  ClubFormField(
+                    controller: _coach,
+                    label: AppLocalizations.get('head_coach_label'),
+                    hint: AppLocalizations.get('coach_name_hint'),
                   ),
-                  const SizedBox(height: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Physical Coach',
-                          style: TextStyle(
-                              color: Colors.white.withOpacity(0.65),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12)),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _physCoach,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: InputDecoration(
-                          hintText: 'Physical coach name',
-                          hintStyle: TextStyle(
-                              color: Colors.white.withOpacity(0.30),
-                              fontSize: 14),
-                          filled: true,
-                          fillColor: AppColors.surface2,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: const BorderSide(
-                                color: AppColors.primary, width: 1.5),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 14),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: ClubUiTokens.spacingLg),
+                  ClubFormField(
+                    controller: _physCoach,
+                    label: AppLocalizations.get('physical_coach_label'),
+                    hint: AppLocalizations.get('physical_coach_hint'),
                   ),
-                  const SizedBox(height: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Notes',
-                          style: TextStyle(
-                              color: Colors.white.withOpacity(0.65),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12)),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _notes,
-                        maxLines: 3,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: InputDecoration(
-                          hintText: 'Optional notes',
-                          hintStyle: TextStyle(
-                              color: Colors.white.withOpacity(0.30),
-                              fontSize: 14),
-                          filled: true,
-                          fillColor: AppColors.surface2,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide:
-                                const BorderSide(color: AppColors.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: const BorderSide(
-                                color: AppColors.primary, width: 1.5),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 14),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: ClubUiTokens.spacingLg),
+                  ClubFormField(
+                    controller: _notes,
+                    label: AppLocalizations.get('session_notes_label'),
+                    hint: AppLocalizations.get('optional_hint'),
+                    maxLines: 3,
                   ),
                 ],
               ),

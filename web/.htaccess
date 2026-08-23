@@ -1,0 +1,76 @@
+# NextKick — Flutter Web + MediaPipe Pose (shared hosting / cPanel config)
+# Place this file in the same directory as index.html on your server.
+
+# ── MIME types ─────────────────────────────────────────────────────────────────
+AddType application/wasm               .wasm
+AddType application/octet-stream       .task
+AddType application/javascript         .js
+AddType text/javascript                .mjs
+AddType application/json               .json
+
+# ── Flutter client-side routing ────────────────────────────────────────────────
+# Every URL that is not a real file/directory falls back to index.html.
+# RewriteBase must match the --base-href used during build (e.g. /almerrikh/).
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /almerrikh/
+
+  # Do not rewrite real files or directories.
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# ── Cache headers ───────────────────────────────────────────────────────────────
+<IfModule mod_expires.c>
+  ExpiresActive On
+
+  # Flutter build output uses content-hash filenames → safe to cache forever.
+  ExpiresByType application/javascript  "access plus 1 year"
+  ExpiresByType text/javascript         "access plus 1 year"
+  ExpiresByType application/wasm        "access plus 1 year"
+  ExpiresByType application/json        "access plus 1 hour"
+
+  # MediaPipe model and WASM: cache aggressively (versioned by path).
+  ExpiresByType application/octet-stream "access plus 1 year"
+
+  # These files change every build — never cache them.
+  <FilesMatch "^(index\.html|flutter_service_worker\.js|flutter_bootstrap\.js|main\.dart\.js|version\.json)$">
+    ExpiresDefault "access plus 0 seconds"
+    Header always set Cache-Control "no-cache, no-store, must-revalidate"
+    Header always set Pragma "no-cache"
+  </FilesMatch>
+</IfModule>
+
+# ── Cache-Control: immutable for versioned MediaPipe assets ────────────────────
+# wasm / task / mjs files are content-versioned — safe to cache immutably.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(wasm|task|mjs)$">
+    Header append Cache-Control "immutable"
+  </FilesMatch>
+</IfModule>
+
+# ── COOP / COEP headers ─────────────────────────────────────────────────────────
+# Required for SharedArrayBuffer (CanvasKit WASM on desktop).
+# credentialless COEP allows cross-origin resources (Google Fonts, Firebase, CDN)
+# without needing CORS headers on every asset.
+<IfModule mod_headers.c>
+  Header always set Cross-Origin-Opener-Policy   "same-origin"
+  Header always set Cross-Origin-Embedder-Policy "credentialless"
+</IfModule>
+
+# ── HTTPS redirect ─────────────────────────────────────────────────────────────
+# getUserMedia (camera) and WASM both require HTTPS on production.
+# Enable this AFTER SSL is active on your cPanel host:
+#
+# <IfModule mod_rewrite.c>
+#   RewriteCond %{HTTPS} off
+#   RewriteCond %{HTTP_HOST} !^localhost
+#   RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+# </IfModule>
+
+# ── Compression ────────────────────────────────────────────────────────────────
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE application/javascript text/javascript application/json text/css
+</IfModule>

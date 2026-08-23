@@ -115,6 +115,56 @@ elseif (!empty($body['training_session_id'])) $sessionId = (string)$body['traini
 $linkedPlayerId = $isCoach ? $coachTargetPlayerId : ($user['linked_player_id'] ?? null);
 $clubId         = $isCoach ? $ctx['club_id']      : ($user['club_user_id']     ?? null);
 
+// A self-reported Hooper check is tied to the previous calendar day or the
+// pre-start part of the event day. Keep this rule server-side as well as in
+// the player UI so a direct request cannot submit it too early or too late.
+if (!$isCoach && $sessionId) {
+    if (!$linkedPlayerId) {
+        $playerStmt = $pdo->prepare(
+            'SELECT id FROM club_players WHERE linked_user_id = ? AND is_active = 1
+             ORDER BY created_at DESC LIMIT 1'
+        );
+        $playerStmt->execute([$user['id']]);
+        $linkedPlayerId = $playerStmt->fetchColumn() ?: null;
+    }
+
+    $eventStart = null;
+    if ($linkedPlayerId) {
+        $eventStmt = $pdo->prepare(
+            'SELECT date, start_time FROM club_sessions
+             WHERE id = ? AND JSON_CONTAINS(player_ids, JSON_QUOTE(?)) LIMIT 1'
+        );
+        $eventStmt->execute([$sessionId, (string)$linkedPlayerId]);
+        $event = $eventStmt->fetch(PDO::FETCH_ASSOC);
+        if ($event) {
+            $eventStart = new DateTimeImmutable(
+                $event['date'] . ' ' . ($event['start_time'] ?: '00:00:00')
+            );
+        } else {
+            $eventStmt = $pdo->prepare(
+                'SELECT match_date, match_time FROM matches
+                 WHERE id = ? AND JSON_CONTAINS(player_ids, JSON_QUOTE(?)) LIMIT 1'
+            );
+            $eventStmt->execute([$sessionId, (string)$linkedPlayerId]);
+            $event = $eventStmt->fetch(PDO::FETCH_ASSOC);
+            if ($event) {
+                $eventStart = new DateTimeImmutable(
+                    $event['match_date'] . ' ' . ($event['match_time'] ?: '00:00:00')
+                );
+            }
+        }
+    }
+
+    if (!$eventStart) jsonOut(['error' => 'session_not_found'], 404);
+
+    $now = new DateTimeImmutable('now');
+    $eventDay = new DateTimeImmutable($eventStart->format('Y-m-d'));
+    $dayBefore = $eventDay->modify('-1 day');
+    if ($now < $dayBefore || $now >= $eventStart) {
+        jsonOut(['error' => 'hooper_not_available'], 422);
+    }
+}
+
 // Duplicate prevention: one Hooper entry per player per session (if the
 // check-in is tied to a session), otherwise one per calendar day.
 // The coach path dedupes on linked_player_id (the roster player), never on
@@ -225,8 +275,7 @@ if ($status === 'high_risk' && !$existingId && $linkedPlayerId) {
                 createNotification(
                     $pdo, (int)$formalClubId, (int)$staffUserId,
                     'readiness_alert',
-                    'جاهزية منخفضة: ' . $playerName,
-                    "مؤشر Hooper: $hooper",
+                    ['player_name' => $playerName, 'hooper' => $hooper],
                     '/club/players/' . $linkedPlayerId
                 );
             }
