@@ -58,6 +58,7 @@ flutter:
     - assets/images/
     - assets/videos/
     - assets/fonts/
+    - shorebird.yaml
   fonts:
     - family: Cairo
       fonts:

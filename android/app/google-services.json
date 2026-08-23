@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "443776198308",
-    "project_id": "nextkick-24911",
-    "storage_bucket": "nextkick-24911.firebasestorage.app"
+    "project_number": "947466090687",
+    "project_id": "al-merrikh",
+    "storage_bucket": "al-merrikh.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:443776198308:android:e2dbbd4746a7bc68d82831",
+        "mobilesdk_app_id": "1:947466090687:android:efd24498843f01568cee0a",
         "android_client_info": {
           "package_name": "com.nextkick.almerrikh"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAKWOB-89U3PxoQOJ6sNiEom0rKVKo_03E"
+          "current_key": "AIzaSyBU1RaaMTWIap-pS2moYHwaFUnaYttZNmA"
         }
       ],
       "services": {
