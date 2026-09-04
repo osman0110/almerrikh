@@ -65,18 +65,30 @@ class PlayerShell extends StatelessWidget {
           backgroundColor: AppColors.background,
           drawer: const _PlayerSidebar(),
           body: Builder(
+            // bottom: false so the bottom inset survives down to
+            // _PlayerBottomNav, which already budgets for it via
+            // math.max(14, bottom). Consuming it here too left an empty
+            // background band under the floating pill.
             builder: (scaffoldContext) => SafeArea(
+              bottom: false,
               child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: maxPhoneWidth),
                   child: Column(
                     children: [
                       Container(height: 2, color: AppColors.gold),
+                      // Pages keep seeing a zero bottom inset, as before.
                       Expanded(
-                        child: PhysicalCoachSidebarScope(
-                          openSidebar: () =>
-                              Scaffold.of(scaffoldContext).openDrawer(),
-                          child: child,
+                        child: Builder(
+                          builder: (innerContext) => MediaQuery.removePadding(
+                            context: innerContext,
+                            removeBottom: true,
+                            child: PhysicalCoachSidebarScope(
+                              openSidebar: () =>
+                                  Scaffold.of(scaffoldContext).openDrawer(),
+                              child: child,
+                            ),
+                          ),
                         ),
                       ),
                       _PlayerBottomNav(currentIndex: currentIndex),

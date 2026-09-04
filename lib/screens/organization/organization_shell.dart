@@ -49,7 +49,11 @@ class OrganizationShell extends StatelessWidget {
         ),
         child: Scaffold(
           backgroundColor: AppColors.background,
+          // bottom: false so the bottom inset survives down to _OrgBottomNav,
+          // which already budgets for it via math.max(14, bottom). Consuming it
+          // here too left an empty background band under the floating pill.
           body: SafeArea(
+            bottom: false,
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: maxPhoneWidth),
@@ -57,7 +61,16 @@ class OrganizationShell extends StatelessWidget {
                   children: [
                     if (config.showTopStripe)
                       Container(height: 2, color: config.accentColor),
-                    Expanded(child: child),
+                    // Pages keep seeing a zero bottom inset, as before.
+                    Expanded(
+                      child: Builder(
+                        builder: (innerContext) => MediaQuery.removePadding(
+                          context: innerContext,
+                          removeBottom: true,
+                          child: child,
+                        ),
+                      ),
+                    ),
                     _OrgBottomNav(currentIndex: currentIndex, config: config),
                   ],
                 ),
