@@ -22,18 +22,23 @@ workflows:
       cocoapods: default
       groups:
         - shorebird
-      ios_signing:
-        # App Store distribution profile - NOT development.
-        # A development profile is what caused App Store Connect error 90161.
-        distribution_type: app_store
-        bundle_identifier: com.nextkick.almerrikh
+      vars:
+        BUNDLE_ID: com.nextkick.almerrikh
 
     scripts:
       - name: Fetch packages
         script: flutter pub get
 
       - name: Set up code signing
-        script: xcode-project use-profiles
+        script: |
+          # Creates the bundle id, Apple Distribution certificate and App Store
+          # provisioning profile if they do not exist yet, then writes
+          # $HOME/export_options.plist with method=app-store.
+          # A development profile is what caused App Store Connect error 90161.
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
 
       - name: Install Shorebird
         script: |
