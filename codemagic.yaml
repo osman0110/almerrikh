@@ -9,6 +9,10 @@
 #   console.shorebird.dev while signed in as ksagulfcar@gmail.com, which is
 #   the account that owns the app_id in shorebird.yaml. A key from any other
 #   account fails with "Could not find app with id".
+#   Environment variables: a group named "appstore_signing" holding
+#   CERTIFICATE_PRIVATE_KEY (an RSA private key in PEM form), marked secure.
+#   fetch-signing-files signs the CSR with it; without it no certificate or
+#   profile is created and the export falls back to an empty ad-hoc plist.
 
 workflows:
   ios-appstore:
@@ -25,6 +29,7 @@ workflows:
       cocoapods: default
       groups:
         - shorebird
+        - appstore_signing
       vars:
         BUNDLE_ID: com.nextkick.almerrikh
 
