@@ -4,8 +4,11 @@
 # Required setup in Codemagic UI (one time):
 #   The App Store Connect API key is named "App Manager" (role: App Manager,
 #   key QYNHS5D392) under Settings > Integrations > Developer Portal.
-#   Environment variables: create a group named "shorebird" holding SHOREBIRD_TOKEN
-#   (generate it locally with `shorebird login:ci`), marked secure.
+#   Environment variables: a group named "shorebird" holding SHOREBIRD_TOKEN,
+#   marked secure. `shorebird login:ci` is gone - create an API key at
+#   console.shorebird.dev while signed in as ksagulfcar@gmail.com, which is
+#   the account that owns the app_id in shorebird.yaml. A key from any other
+#   account fails with "Could not find app with id".
 
 workflows:
   ios-appstore:
