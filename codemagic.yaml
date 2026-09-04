@@ -2,8 +2,8 @@
 # Replaces the UI-defined "Default Workflow" so signing + publishing live in the repo.
 #
 # Required setup in Codemagic UI (one time):
-#   Teams > Integrations > Developer Portal -> add App Store Connect API key named "AppStoreConnect".
-#   The key's Apple Developer account must own the bundle id com.nextkick.almerrikh.
+#   The App Store Connect API key is named "App Manager" (role: App Manager,
+#   key QYNHS5D392) under Settings > Integrations > Developer Portal.
 #   Environment variables: create a group named "shorebird" holding SHOREBIRD_TOKEN
 #   (generate it locally with `shorebird login:ci`), marked secure.
 
@@ -14,7 +14,7 @@ workflows:
     instance_type: mac_mini_m2
 
     integrations:
-      app_store_connect: AppStoreConnect
+      app_store_connect: "App Manager"
 
     environment:
       flutter: stable
@@ -49,11 +49,12 @@ workflows:
         script: |
           # export_options.plist is written by `xcode-project use-profiles` with
           # method=app-store, so the archive is signed for distribution.
-          # BUILD_NUMBER is Codemagic's auto-incrementing counter - Shorebird
+          # PROJECT_BUILD_NUMBER is the app-wide counter (BUILD_NUMBER is per
+          # workflow and would restart at a number already used). Shorebird
           # releases are immutable, so every run needs a fresh build number.
           shorebird release ios \
             --export-options-plist=$HOME/export_options.plist \
-            -- --build-number=$BUILD_NUMBER
+            -- --build-number=$PROJECT_BUILD_NUMBER
 
     artifacts:
       - build/ios/ipa/*.ipa
