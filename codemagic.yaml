@@ -61,12 +61,20 @@ workflows:
           # workflow and would restart at a number already used). Shorebird
           # releases are immutable, so every run needs a fresh build number.
           # Never reuse a build number App Store Connect has already seen:
-          # build 16 was pushed to TestFlight (iPhone+iPad), so 17 is the floor.
-          BUILD_NO=$(( PROJECT_BUILD_NUMBER > 17 ? PROJECT_BUILD_NUMBER : 17 ))
+          # builds 16 and 17 were pushed to TestFlight, so 18 is the floor.
+          BUILD_NO=$(( PROJECT_BUILD_NUMBER > 18 ? PROJECT_BUILD_NUMBER : 18 ))
           echo "Using build number $BUILD_NO"
           shorebird release ios \
             --export-options-plist=$HOME/export_options.plist \
             -- --build-number=$BUILD_NO
+
+      - name: Verify no CoreLocation in IPA (ITMS-90683 gates)
+        script: |
+          # No Mac in-house, so the Build 18 gates run here. Any failure aborts
+          # the workflow before the TestFlight upload below.
+          bash docs/apple_review/build18_location_gates.sh pods
+          IPA=$(ls build/ios/ipa/*.ipa | head -1)
+          bash docs/apple_review/build18_location_gates.sh ipa "$IPA"
 
     artifacts:
       - build/ios/ipa/*.ipa
