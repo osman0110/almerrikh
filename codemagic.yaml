@@ -35,7 +35,14 @@ workflows:
 
     scripts:
       - name: Fetch packages
-        script: flutter pub get
+        script: |
+          # Flutter stable (3.44+) integrates plugins through Swift Package
+          # Manager by default, which bypasses ios/Podfile entirely: the
+          # PICKER_MEDIA / PERMISSION_* settings there never reach the build
+          # and file_picker's Package.swift pulls DKImagePickerController ->
+          # DKCamera -> CoreLocation (ITMS-90683). Force CocoaPods.
+          flutter config --no-enable-swift-package-manager
+          flutter pub get
 
       - name: Set up code signing
         script: |

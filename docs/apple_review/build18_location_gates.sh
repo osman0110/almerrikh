@@ -9,7 +9,13 @@ PATTERN='CLLocationManager|requestWhenInUseAuthorization|startUpdatingLocation|D
 
 case "${1:-}" in
   pods)
-    echo "== Gate 1: ios/Podfile.lock must not list any DK pod"
+    echo "== Gate 1: ios/Podfile.lock must exist (CocoaPods path) and list no DK pod"
+    if [ ! -f ios/Podfile.lock ]; then
+      echo "FAIL: ios/Podfile.lock missing - plugins were integrated via SwiftPM, Podfile settings did not apply."; exit 1
+    fi
+    if [ -d ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage ]; then
+      echo "FAIL: SwiftPM plugin package present - Podfile settings did not apply."; exit 1
+    fi
     if grep -Ei "DKCamera|DKImagePickerController|DKPhotoGallery" ios/Podfile.lock; then
       echo "FAIL: DK pods still present. Do not build."; exit 1
     fi
