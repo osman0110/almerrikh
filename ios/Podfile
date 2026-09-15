@@ -60,8 +60,9 @@ post_install do |installer|
     # so the framework no longer advertises the Location API.
     if target.name == 'camera_avfoundation'
       target.build_configurations.each do |config|
-        config.build_settings['OTHER_LDFLAGS'] ||= ['$(inherited)']
-        config.build_settings['OTHER_LDFLAGS'] += ['-Wl,-dead_strip_dylibs']
+        # OTHER_LDFLAGS may be nil, a String or an Array here.
+        flags = Array(config.build_settings['OTHER_LDFLAGS'] || '$(inherited)')
+        config.build_settings['OTHER_LDFLAGS'] = flags + ['-Wl,-dead_strip_dylibs']
       end
     end
 
