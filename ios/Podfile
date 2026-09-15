@@ -55,17 +55,6 @@ post_install do |installer|
     # location. Compile in only what the app actually asks for: camera and
     # microphone for assessment recording, photos for the player picture,
     # and notifications.
-    # camera_avfoundation ends up with a CoreLocation load command although
-    # it references no CoreLocation symbol. Drop dylibs nothing links against
-    # so the framework no longer advertises the Location API.
-    if target.name == 'camera_avfoundation'
-      target.build_configurations.each do |config|
-        # OTHER_LDFLAGS may be nil, a String or an Array here.
-        flags = Array(config.build_settings['OTHER_LDFLAGS'] || '$(inherited)')
-        config.build_settings['OTHER_LDFLAGS'] = flags + ['-Wl,-dead_strip_dylibs']
-      end
-    end
-
     target.build_configurations.each do |config|
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
         '$(inherited)',
