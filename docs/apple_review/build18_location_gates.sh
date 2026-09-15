@@ -37,6 +37,10 @@ case "${1:-}" in
     while IFS= read -r f; do
       if file "$f" | grep -q "Mach-O" && otool -L "$f" 2>/dev/null | grep -q CoreLocation; then
         echo "FOUND CoreLocation: $f"; FAIL=1
+        echo "   -- CoreLocation symbols referenced by this binary (empty = bare autolink):"
+        nm -um "$f" 2>/dev/null | grep -i "CoreLocation" | sed 's/^/   /'
+        echo "   -- other Location-named undefined symbols:"
+        nm -u "$f" 2>/dev/null | grep -iE "Location|_CL[A-Z]" | sed 's/^/   /'
       fi
     done < <(find "$APP" -type f)
     [ "$FAIL" -eq 0 ] && echo "PASS" || { echo "FAIL"; exit 1; }
