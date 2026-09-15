@@ -31,6 +31,7 @@ import '../club/club_widgets.dart'
         RoleBrandHeader,
         RoleDateMarker,
         RoleHomeDateStrip;
+import '../account_deletion.dart';
 import '../club/notifications_page.dart';
 import '../club/standings_page.dart';
 import 'independent_ai_plan_screen.dart';
@@ -2168,6 +2169,13 @@ class _PlayerProfileBodyState extends State<_PlayerProfileBody> {
                           context,
                         ).pushNamedAndRemoveUntil('/auth', (_) => false);
                       },
+                    ),
+                    const SizedBox(height: 10),
+                    _ProfileAction(
+                      icon: Icons.delete_forever_rounded,
+                      label: AppLocalizations.get('delete_account'),
+                      color: Colors.red,
+                      onTap: () => showDeleteAccountFlow(context),
                     ),
                     const SizedBox(height: 24),
                   ],

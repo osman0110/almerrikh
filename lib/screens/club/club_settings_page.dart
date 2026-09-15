@@ -14,6 +14,7 @@ import '../../services/club_service.dart';
 import '../../services/notification_service.dart';
 import '../../storage.dart';
 import '../../utils/crash_reporter.dart';
+import '../account_deletion.dart';
 import 'club_dashboard.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -339,6 +340,12 @@ class _ClubSettingsPageState extends State<ClubSettingsPage> {
               title: AppLocalizations.get('sign_out'),
               subtitle: AppLocalizations.get('logout_msg'),
               onTap: _showLogout,
+            ),
+            _DangerRow(
+              icon: Icons.delete_forever_rounded,
+              title: AppLocalizations.get('delete_account'),
+              subtitle: AppLocalizations.get('delete_account_subtitle'),
+              onTap: () => showDeleteAccountFlow(context),
             ),
           ]),
 

@@ -22,7 +22,7 @@ const String kWebBase = _webBaseOverride != ''
         : 'http://localhost/academy/nextkickwebsite';
 
 // ─── App version — keep in sync with pubspec.yaml ────────────────────────────
-const String kAppVersion = '1.0.0+1';
+const String kAppVersion = '1.0.0+16';
 
 // ─── Sentry DSN ───────────────────────────────────────────────────────────────
 // Injected at build time — never hardcode in source control:

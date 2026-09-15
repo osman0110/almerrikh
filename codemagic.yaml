@@ -60,9 +60,13 @@ workflows:
           # PROJECT_BUILD_NUMBER is the app-wide counter (BUILD_NUMBER is per
           # workflow and would restart at a number already used). Shorebird
           # releases are immutable, so every run needs a fresh build number.
+          # Never reuse a build number App Store Connect has already seen:
+          # build 15 was the last one submitted, so 16 is the floor.
+          BUILD_NO=$(( PROJECT_BUILD_NUMBER > 16 ? PROJECT_BUILD_NUMBER : 16 ))
+          echo "Using build number $BUILD_NO"
           shorebird release ios \
             --export-options-plist=$HOME/export_options.plist \
-            -- --build-number=$PROJECT_BUILD_NUMBER
+            -- --build-number=$BUILD_NO
 
     artifacts:
       - build/ios/ipa/*.ipa

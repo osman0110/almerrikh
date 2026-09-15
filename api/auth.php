@@ -702,6 +702,186 @@ switch ($action) {
         jsonOut(['success' => true]);
     }
 
+    // ── Delete account (App Store guideline 5.1.1(v)) ─────────────────────────
+    // Permanently removes the caller's login and personal data. Club-level
+    // records (roster, sessions, matches, assessments a coach recorded about
+    // players) are retained by the club as the data controller; only the
+    // caller's identity, tokens, devices, notifications and self-reported
+    // data are destroyed. Independent players own their whole dataset, so
+    // everything keyed by their user id is removed.
+    case 'delete_account': {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            jsonOut(['error' => 'Method not allowed'], 405);
+        }
+        $user = getAuthUser($pdo);
+        $uid  = (int)$user['id'];
+
+        $password = (string)($body['password'] ?? '');
+        if ($password === '') {
+            jsonOut(['error' => 'Password is required to delete the account'], 400);
+        }
+        $pw = $pdo->prepare('SELECT password_hash, role, player_type, linked_player_id, club_id FROM users WHERE id = ?');
+        $pw->execute([$uid]);
+        $row = $pw->fetch(PDO::FETCH_ASSOC);
+        if (!$row || !password_verify($password, (string)$row['password_hash'])) {
+            jsonOut(['error' => 'Incorrect password'], 403);
+        }
+
+        $role          = $row['role'] ?? 'club';
+        $linkedPlayer  = $row['linked_player_id'] ?: null;
+        $isPlayer      = $role === 'player';
+        $isIndependent = false;
+        if ($isPlayer && $linkedPlayer) {
+            $cp = $pdo->prepare('SELECT user_id, player_type FROM club_players WHERE id = ? LIMIT 1');
+            $cp->execute([$linkedPlayer]);
+            $cpRow = $cp->fetch(PDO::FETCH_ASSOC);
+            $isIndependent = $cpRow
+                && (int)$cpRow['user_id'] === $uid
+                && ($cpRow['player_type'] ?? '') !== 'club';
+        }
+
+        $deleteWhere = function (string $table, string $column, $value) use ($pdo): int {
+            if (!SchemaInspector::hasTable($pdo, $table) || !SchemaInspector::hasColumn($pdo, $table, $column)) return 0;
+            $st = $pdo->prepare("DELETE FROM `$table` WHERE `$column` = ?");
+            $st->execute([$value]);
+            return $st->rowCount();
+        };
+        $nullWhere = function (string $table, string $column, $value) use ($pdo): int {
+            if (!SchemaInspector::hasTable($pdo, $table) || !SchemaInspector::hasColumn($pdo, $table, $column)) return 0;
+            $st = $pdo->prepare("UPDATE `$table` SET `$column` = NULL WHERE `$column` = ?");
+            $st->execute([$value]);
+            return $st->rowCount();
+        };
+
+        // DDL is an implicit COMMIT in MySQL, so the log table must exist
+        // before the transaction opens.
+        $pdo->exec("CREATE TABLE IF NOT EXISTS account_deletions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            role VARCHAR(32) NULL,
+            email_hash CHAR(64) NOT NULL,
+            deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )");
+
+        $summary = [];
+        try {
+            $pdo->beginTransaction();
+
+            // Avatar file on disk (only when it lives in our own uploads folder).
+            $avatarUrl = (string)($user['avatar_url'] ?? '');
+            if ($avatarUrl !== '' && preg_match('#/uploads/players/([A-Za-z0-9._-]+)$#', $avatarUrl, $m)) {
+                $file = __DIR__ . '/../uploads/players/' . $m[1];
+                if (is_file($file)) @unlink($file);
+            }
+
+            // 1. Self-reported / personal data submitted by this user.
+            $staffKeeps = ['player_rpe', 'player_rpe_revisions', 'player_hooper_index', 'player_body_metrics', 'hydration_logs'];
+            foreach ([
+                ['player_rpe', 'user_id'], ['player_rpe_revisions', 'user_id'],
+                ['player_hooper_index', 'user_id'],
+                ['player_body_metrics', 'user_id'],
+                ['player_wearable_data', 'user_id'],
+                ['post_training_feedback', 'player_user_id'],
+                ['session_players', 'player_user_id'],
+                ['plan_players', 'player_user_id'],
+                ['training_plans', 'player_user_id'],
+                ['hydration_logs', 'logged_by_user_id'],
+                ['survey_responses', 'user_id'],
+            ] as [$t, $c]) {
+                // For staff accounts these tables hold entries recorded about
+                // players on the club's behalf — those stay with the club.
+                if (!$isPlayer && in_array($t, $staffKeeps, true)) continue;
+                $n = $deleteWhere($t, $c, $uid);
+                if ($n) $summary[$t] = ($summary[$t] ?? 0) + $n;
+            }
+
+            // 2. Player roster link.
+            if ($isPlayer && $linkedPlayer) {
+                if ($isIndependent) {
+                    // Independent players are their own tenant: everything
+                    // keyed by their user id or their player id goes.
+                    foreach (['assessments', 'fms_assessments', 'coach_evaluations', 'session_attendance',
+                              'club_sessions', 'matches', 'club_teams', 'training_sessions',
+                              'player_body_composition_assessments', 'player_notes'] as $t) {
+                        $n = $deleteWhere($t, 'user_id', $uid);
+                        if ($n) $summary[$t] = ($summary[$t] ?? 0) + $n;
+                    }
+                    foreach (['assessments', 'fms_assessments', 'session_attendance', 'player_notes',
+                              'player_status_history', 'player_daily_decisions', 'injury_cases',
+                              'physio_sessions', 'nutrition_profiles', 'nutrition_day_plans',
+                              'nutrition_compliance_logs', 'hydration_logs', 'supplements'] as $t) {
+                        $n = $deleteWhere($t, 'player_id', $linkedPlayer);
+                        if ($n) $summary[$t] = ($summary[$t] ?? 0) + $n;
+                    }
+                    $n = $deleteWhere('club_players', 'id', $linkedPlayer);
+                    if ($n) $summary['club_players'] = $n;
+                } else {
+                    // Club-managed player: the club keeps its roster record,
+                    // but it is no longer linked to any login.
+                    $nullWhere('club_players', 'linked_user_id', $uid);
+                    $summary['club_players_unlinked'] = 1;
+                }
+            }
+
+            // 3. Staff membership and club ownership pointer.
+            $n = $deleteWhere('club_staff', 'user_id', $uid);
+            if ($n) $summary['club_staff'] = $n;
+            $nullWhere('clubs', 'owner_user_id', $uid);
+            $nullWhere('academies', 'owner_user_id', $uid);
+            $deleteWhere('academy_staff', 'user_id', $uid);
+            $deleteWhere('academy_staff_assignments', 'user_id', $uid);
+            $deleteWhere('academy_team_coaches', 'user_id', $uid);
+            $nullWhere('academy_players', 'user_id', $uid);
+            $deleteWhere('parent_child_links', 'parent_user_id', $uid);
+
+            // 4. Nullable authorship / audit pointers in every table — driven
+            //    by information_schema so production-only tables are covered.
+            //    Plain `user_id` (tenant key) and `club_user_id` (other users'
+            //    pointer to their club) are deliberately excluded.
+            $cols = $pdo->prepare(
+                "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND IS_NULLABLE = 'YES'
+                   AND TABLE_NAME <> 'users'
+                   AND (COLUMN_NAME LIKE '%\\_user\\_id' OR COLUMN_NAME IN ('created_by', 'updated_by'))
+                   AND COLUMN_NAME NOT IN ('club_user_id', 'player_user_id')"
+            );
+            $cols->execute();
+            foreach ($cols->fetchAll(PDO::FETCH_NUM) as [$t, $c]) {
+                $nullWhere($t, $c, $uid);
+            }
+
+            // 5. Identity: devices, notifications, sessions, profile, login.
+            foreach ([
+                ['device_tokens', 'user_id'], ['notifications', 'user_id'],
+                ['user_profiles', 'user_id'], ['user_tokens', 'user_id'],
+                ['payment_verification_logs', 'user_id'],
+            ] as [$t, $c]) {
+                $n = $deleteWhere($t, $c, $uid);
+                if ($n) $summary[$t] = $n;
+            }
+            $pdo->prepare('DELETE FROM auth_rate_limit WHERE identifier_hash = ?')
+                ->execute([identHash((string)$user['email'])]);
+
+            // Minimal, PII-free record so support can confirm a deletion later.
+            $pdo->prepare('INSERT INTO account_deletions (user_id, role, email_hash) VALUES (?, ?, ?)')
+                ->execute([$uid, $role, identHash((string)$user['email'])]);
+
+            $del = $pdo->prepare('DELETE FROM users WHERE id = ?');
+            $del->execute([$uid]);
+            if ($del->rowCount() !== 1) {
+                throw new RuntimeException('User row was not deleted');
+            }
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('delete_account failed for user ' . $uid . ': ' . $e->getMessage());
+            jsonOut(['error' => 'Account deletion failed. Please try again or contact support.'], 500);
+        }
+
+        jsonOut(['success' => true, 'deleted' => true, 'summary' => $summary]);
+    }
+
     // ── Logout ────────────────────────────────────────────────────────────────
     case 'logout': {
         $token = bearerToken();

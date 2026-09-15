@@ -1512,6 +1512,27 @@ class ApiService {
     }
   }
 
+  /// Permanently deletes the signed-in account (App Store 5.1.1(v)). The
+  /// server re-checks [password] before destroying anything. On success the
+  /// bearer token is already invalid, so the local token is cleared too.
+  static Future<Map<String, dynamic>> deleteAccount({
+    required String password,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/auth.php?action=delete_account'),
+        headers: _headers,
+        body: jsonEncode({'password': password}),
+      ).timeout(const Duration(seconds: 30));
+      final data = _decodeResponse(res);
+      if (data['success'] == true) _token = null;
+      return data;
+    } catch (e) {
+      AppLogger.e('ApiService.deleteAccount', 'Request failed', e);
+      return {'error': 'Connection error. Please try again.'};
+    }
+  }
+
   static Future<Map<String, dynamic>> saveProfile({
     required String playerName,
     required int age,
