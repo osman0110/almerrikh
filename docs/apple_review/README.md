@@ -3,6 +3,11 @@
 Prepared 2026-09-15 for the rejection of 1.0 (15): Guideline 5.1.1(v) Account Deletion and
 Guideline 2.3.3 iPad screenshots.
 
+**Update (build 17, 2026-09-15):** the app is iPhone-only again (`TARGETED_DEVICE_FAMILY = 1`,
+no `~ipad` orientation keys), so App Store Connect should no longer ask for iPad screenshots once
+build 17 is selected. The `screenshots_ipad_13/` folder is kept for reference only. The account
+deletion fix (5.1.1(v)) is unchanged and still required.
+
 ## Contents
 
 - `screenshots_ipad_13/` — 12 PNGs, 2064x2752 (13-inch iPad portrait, the size App Store Connect
