@@ -44,6 +44,10 @@
 	<string>يستخدم التطبيق الميكروفون عند تسجيل مقاطع الفيديو الخاصة بالتقييم البدني.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>يستخدم التطبيق مكتبة الصور لاختيار صورة اللاعب أو مقطع تقييم محفوظ.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>
