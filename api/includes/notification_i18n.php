@@ -17,9 +17,17 @@
 function notificationLang(PDO $pdo, int $userId): string {
     static $cache = [];
     if (array_key_exists($userId, $cache)) return $cache[$userId];
-    $stmt = $pdo->prepare('SELECT language FROM users WHERE id = ?');
-    $stmt->execute([$userId]);
-    $lang = $stmt->fetchColumn();
+    // users.language only exists after migration 0022 (or the legacy
+    // bootstrap). Never let a missing column kill a notification: fall back
+    // to Arabic, the club default.
+    try {
+        $stmt = $pdo->prepare('SELECT language FROM users WHERE id = ?');
+        $stmt->execute([$userId]);
+        $lang = $stmt->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('[notify] users.language unavailable: ' . $e->getMessage());
+        $lang = null;
+    }
     $lang = in_array($lang, ['ar', 'en', 'fr'], true) ? $lang : 'ar';
     return $cache[$userId] = $lang;
 }
