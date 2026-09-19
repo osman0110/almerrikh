@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'feature_flags.dart';
 import 'dart:math' as math;
 
 import 'package:firebase_core/firebase_core.dart';
@@ -502,6 +503,12 @@ class SsotApp extends StatelessWidget {
             '/physical-assessment/new-player',
             '/physical-assessment/camera',
           ];
+          // AI tests hidden via feature flag: deep links / stale routes into
+          // the test flow land on a safe "unavailable" page (no crash). Result
+          // and history routes stay reachable for past results.
+          if (!kAiTestsEnabled && assessmentPaths.contains(path)) {
+            page = const AiTestsUnavailablePage();
+          }
           if (assessmentPaths.contains(path) &&
               ApiService.token != null &&
               currentUserId != null &&

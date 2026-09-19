@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../feature_flags.dart';
 import 'package:flutter/material.dart';
 import '../../app_colors.dart';
 import '../../app_localizations.dart';
@@ -800,7 +801,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                 ),
             ],
           ),
-          if (canRunAssessments && batchAllowedTypes.isNotEmpty && pctInt < 100) ...[
+          if (kAiTestsEnabled && canRunAssessments && batchAllowedTypes.isNotEmpty && pctInt < 100) ...[
             const SizedBox(height: 16),
             GestureDetector(
               onTap: _startBatchAssessment,
@@ -1180,7 +1181,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
                                     fontSize: 11)),
                           ]),
                         )
-                      else
+                      else if (kAiTestsEnabled)
                         GestureDetector(
                           onTap: () => _startTest(p),
                           child: Container(

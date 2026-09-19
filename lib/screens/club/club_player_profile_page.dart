@@ -1,4 +1,5 @@
 import 'package:fl_chart/fl_chart.dart';
+import '../../feature_flags.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import '../../utils/app_logger.dart';
@@ -1757,12 +1758,15 @@ class _ClubPlayerProfilePageState extends State<ClubPlayerProfilePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _assessmentPrimaryButton(
-          AppLocalizations.get('start_camera_assessment_btn'),
-          Icons.videocam_rounded,
-          _startAssessment,
-        ),
-        const SizedBox(height: 8),
+        // Camera/AI test entry hidden while AI tests are disabled.
+        if (kAiTestsEnabled) ...[
+          _assessmentPrimaryButton(
+            AppLocalizations.get('start_camera_assessment_btn'),
+            Icons.videocam_rounded,
+            _startAssessment,
+          ),
+          const SizedBox(height: 8),
+        ],
         _assessmentSecondaryButton(
           hasScore
               ? AppLocalizations.get('view_report_btn')

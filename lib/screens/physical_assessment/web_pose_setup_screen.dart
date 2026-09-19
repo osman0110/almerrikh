@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../feature_flags.dart';
 
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
@@ -38,7 +39,9 @@ class WebPoseSetupScreen extends StatefulWidget {
   final AssessmentCameraArguments cameraArgs;
 
   @override
-  State<WebPoseSetupScreen> createState() => _WebPoseSetupScreenState();
+  State<WebPoseSetupScreen> createState() =>
+      // AI tests hidden via feature flag — never start the camera/pose flow.
+      kAiTestsEnabled ? _WebPoseSetupScreenState() : AiTestsDisabledState<WebPoseSetupScreen>();
 }
 
 class _WebPoseSetupScreenState extends State<WebPoseSetupScreen>

@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../feature_flags.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../../api_service.dart';
@@ -18,7 +19,9 @@ class AssessmentHubPage extends StatefulWidget {
   const AssessmentHubPage({super.key});
 
   @override
-  State<AssessmentHubPage> createState() => _AssessmentHubPageState();
+  State<AssessmentHubPage> createState() =>
+      // AI tests hidden via feature flag — never start the camera/pose flow.
+      kAiTestsEnabled ? _AssessmentHubPageState() : AiTestsDisabledState<AssessmentHubPage>();
 }
 
 class _AssessmentHubPageState extends State<AssessmentHubPage> {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
+import '../../feature_flags.dart';
 import '../../app_colors.dart';
 import '../../app_localizations.dart';
 import '../../app_state.dart';
@@ -909,6 +910,17 @@ class _SessionFormPageState extends State<SessionFormPage>
   }
 
   Widget _exercisesSection() {
+    // AI tests disabled → manual exercises only. AI exercises already saved
+    // on a session are kept untouched in _exercises (never deleted).
+    if (!kAiTestsEnabled) {
+      return Container(
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border)),
+        child: SizedBox(height: 280, child: _manualExercisesTab()),
+      );
+    }
     return Container(
       decoration: BoxDecoration(
         color: AppColors.card,

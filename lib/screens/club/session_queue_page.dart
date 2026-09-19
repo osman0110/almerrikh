@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../../feature_flags.dart';
 import 'package:flutter/material.dart';
 import '../../app_colors.dart';
 import '../../app_localizations.dart';
@@ -23,7 +24,9 @@ class SessionQueuePage extends StatefulWidget {
   final AssessmentTestType assessmentType;
 
   @override
-  State<SessionQueuePage> createState() => _SessionQueuePageState();
+  State<SessionQueuePage> createState() =>
+      // AI tests hidden via feature flag — never start the camera/pose flow.
+      kAiTestsEnabled ? _SessionQueuePageState() : AiTestsDisabledState<SessionQueuePage>();
 }
 
 class _SessionQueuePageState extends State<SessionQueuePage> {

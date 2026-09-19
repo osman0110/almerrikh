@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../feature_flags.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../../api_service.dart';
@@ -16,7 +17,9 @@ class PlayerSelectionPage extends StatefulWidget {
   const PlayerSelectionPage({super.key});
 
   @override
-  State<PlayerSelectionPage> createState() => _PlayerSelectionPageState();
+  State<PlayerSelectionPage> createState() =>
+      // AI tests hidden via feature flag — never start the camera/pose flow.
+      kAiTestsEnabled ? _PlayerSelectionPageState() : AiTestsDisabledState<PlayerSelectionPage>();
 }
 
 class _PlayerSelectionPageState extends State<PlayerSelectionPage> {

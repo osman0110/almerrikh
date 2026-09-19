@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import '../../feature_flags.dart';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -900,12 +901,14 @@ class _TeamPerformanceReportScreenState extends State<TeamPerformanceReportScree
                     pctInt == 100 ? AppColors.success : AppColors.primary),
               ),
             ),
-            const SizedBox(height: 14),
-            PrimaryButton(
-              label: AppLocalizations.get('start_assessments_label'),
-              icon: Icons.play_arrow_rounded,
-              onTap: () => Navigator.of(context).pushNamed('/club/sessions'),
-            ),
+            if (kAiTestsEnabled) ...[ // AI tests hidden via feature flag
+              const SizedBox(height: 14),
+              PrimaryButton(
+                label: AppLocalizations.get('start_assessments_label'),
+                icon: Icons.play_arrow_rounded,
+                onTap: () => Navigator.of(context).pushNamed('/club/sessions'),
+              ),
+            ],
           ],
         ),
       ),

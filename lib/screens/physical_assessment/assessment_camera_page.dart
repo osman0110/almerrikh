@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../feature_flags.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -70,7 +71,9 @@ class AssessmentCameraPage extends StatefulWidget {
   final int? attemptNumber;
 
   @override
-  State<AssessmentCameraPage> createState() => _AssessmentCameraPageState();
+  State<AssessmentCameraPage> createState() =>
+      // AI tests hidden via feature flag — never start the camera/pose flow.
+      kAiTestsEnabled ? _AssessmentCameraPageState() : AiTestsDisabledState<AssessmentCameraPage>();
 }
 
 class _AssessmentCameraPageState extends State<AssessmentCameraPage>

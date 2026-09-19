@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../feature_flags.dart';
 import '../../utils/app_logger.dart';
 
 import '../../app_colors.dart';
@@ -964,6 +965,7 @@ class _PhysicalCoachDashboardPageState
     // _buildTodayStatsRow above — kept out of this icon row so the two
     // functions aren't duplicated on screen.
     final recordingActions = [
+      if (kAiTestsEnabled) // AI tests hidden via feature flag
       _primaryAction(
         icon: Icons.videocam_rounded,
         label: AppLocalizations.get('start_ai_test'),
@@ -1271,6 +1273,7 @@ class _PhysicalCoachDashboardPageState
                 ),
               ),
               const SizedBox(height: 12),
+              if (kAiTestsEnabled) ...[ // AI tests hidden via feature flag
               _linkCard(
                 icon: Icons.videocam_rounded,
                 color: AppColors.maroon,
@@ -1281,6 +1284,7 @@ class _PhysicalCoachDashboardPageState
                 },
               ),
               const SizedBox(height: 8),
+              ],
               _linkCard(
                 icon: Icons.checklist_rtl_rounded,
                 color: AppColors.coachAccent,
@@ -1402,6 +1406,7 @@ class _PhysicalCoachDashboardPageState
   // ignore: unused_element
   Widget _buildQuickActions(BuildContext context) {
     final actions = [
+      if (kAiTestsEnabled)
       ClubActionTile(
         icon: Icons.videocam_rounded,
         label: AppLocalizations.get('start_ai_test'),

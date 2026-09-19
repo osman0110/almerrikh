@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../feature_flags.dart';
 
 import '../../api_service.dart';
 import '../../app_colors.dart';
@@ -434,7 +435,7 @@ class _ExerciseCard extends StatelessWidget {
             ),
 
           // Pose detection placeholder
-          if (exercise.requiresPoseDetection)
+          if (kAiTestsEnabled && exercise.requiresPoseDetection)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
               child: Container(
