@@ -31,6 +31,12 @@ const List<String> _invitableAccountTypes = [
   'analyst',
 ];
 
+/// Roles the current user may grant — only the owner may create an admin
+/// (enforced server-side in club/staff.php; this just hides the option).
+List<String> get _grantableAccountTypes => _invitableAccountTypes
+    .where((r) => r != 'admin' || currentOrgRole == OrgRole.owner)
+    .toList();
+
 String _roleLabel(String role) =>
     AppLocalizations.get('role_$role') != 'role_$role'
         ? AppLocalizations.get('role_$role')
@@ -351,7 +357,7 @@ class _ClubStaffScreenState extends State<ClubStaffScreen>
                     dropdownColor: AppColors.card,
                     style: const TextStyle(
                         color: AppColors.foreground, fontSize: 14),
-                    items: _invitableAccountTypes
+                    items: _grantableAccountTypes
                         .map((r) => DropdownMenuItem(
                               value: r,
                               child: Text(_roleLabel(r)),
@@ -537,7 +543,7 @@ class _ClubStaffScreenState extends State<ClubStaffScreen>
                         isExpanded: true,
                         dropdownColor: AppColors.card,
                         style: fieldStyle,
-                        items: _invitableAccountTypes
+                        items: _grantableAccountTypes
                             .where((r) => r != 'player')
                             .map((r) => DropdownMenuItem(
                                   value: r,

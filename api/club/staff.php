@@ -97,6 +97,14 @@ if ($method === 'POST') {
         $code     = trim($body['code'] ?? '');
         $isActive = !empty($body['is_active']) ? 1 : 0;
         if (!$code) jsonOut(['error' => 'code is required'], 400);
+        // Re-activating an admin invite would mint admins — owner only.
+        if ($isActive && ($ctx['staff_role'] ?? '') !== 'owner') {
+            $typeStmt = $pdo->prepare('SELECT account_type FROM club_access_codes WHERE code = ? AND club_id = ?');
+            $typeStmt->execute([$code, $ctx['club_id']]);
+            if ($typeStmt->fetchColumn() === 'admin') {
+                jsonOut(['error' => 'Only the club owner can activate an admin invite', 'code' => 'owner_only'], 403);
+            }
+        }
         $pdo->prepare('UPDATE club_access_codes SET is_active = ? WHERE code = ? AND club_id = ?')
             ->execute([$isActive, $code, $ctx['club_id']]);
         jsonOut(['success' => true, 'code' => $code, 'is_active' => (bool)$isActive]);
@@ -129,6 +137,11 @@ if ($method === 'POST') {
         $staffRoles = array_values(array_diff($allowedAccountTypes, ['player']));
         if (!in_array($staffRole, $staffRoles, true)) {
             jsonOut(['error' => 'Invalid staff role', 'allowed' => $staffRoles], 400);
+        }
+        // Privilege escalation guard: only the owner may create an admin
+        // (an admin cannot mint another admin; nobody can create an owner).
+        if ($staffRole === 'admin' && ($ctx['staff_role'] ?? '') !== 'owner') {
+            jsonOut(['error' => 'Only the club owner can create an admin account', 'code' => 'owner_only'], 403);
         }
 
         $dup = $pdo->prepare('SELECT id FROM users WHERE email = ?' . ($phone !== '' ? ' OR phone = ?' : ''));
@@ -224,6 +237,10 @@ if ($method === 'POST') {
     $accountType = in_array($body['account_type'] ?? $body['staff_role'] ?? '', $allowedAccountTypes, true)
         ? ($body['account_type'] ?? $body['staff_role'])
         : 'coach';
+    // Same guard for invite codes: an admin-type code is an admin account.
+    if ($accountType === 'admin' && ($ctx['staff_role'] ?? '') !== 'owner') {
+        jsonOut(['error' => 'Only the club owner can create an admin invite', 'code' => 'owner_only'], 403);
+    }
     $note = trim($body['note'] ?? '');
 
     do {
@@ -257,10 +274,15 @@ if ($method === 'DELETE') {
     if (!$id) jsonOut(['error' => 'id or code is required'], 400);
 
     // Never allow removing the owner via this endpoint.
-    $target = $pdo->prepare("SELECT user_id FROM club_staff WHERE id = ? AND club_id = ? AND staff_role != 'owner'");
+    $target = $pdo->prepare("SELECT user_id, staff_role FROM club_staff WHERE id = ? AND club_id = ? AND staff_role != 'owner'");
     $target->execute([$id, $ctx['club_id']]);
-    $targetUserId = $target->fetchColumn();
-    if ($targetUserId === false) jsonOut(['error' => 'Staff member not found'], 404);
+    $targetRow = $target->fetch(PDO::FETCH_ASSOC);
+    if (!$targetRow) jsonOut(['error' => 'Staff member not found'], 404);
+    $targetUserId = (int)$targetRow['user_id'];
+    // Admins are managed by the owner only (no admin-vs-admin suspension).
+    if ($targetRow['staff_role'] === 'admin' && ($ctx['staff_role'] ?? '') !== 'owner') {
+        jsonOut(['error' => 'Only the club owner can suspend an admin', 'code' => 'owner_only'], 403);
+    }
 
     $pdo->prepare(
         "UPDATE club_staff SET status = 'suspended'
