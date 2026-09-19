@@ -18,7 +18,12 @@ if (!$src || !$dst || !str_contains($src, 'test') || !str_contains($dst, 'test')
     fwrite(STDERR, "Usage: php make_readiness_test_db.php <source_test_db> <new_test_db> (names must contain 'test')\n");
     exit(2);
 }
-$pdo = new PDO('mysql:host=127.0.0.1;charset=utf8mb4', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$pdo = new PDO(
+    'mysql:host=' . (getenv('TEST_DB_HOST') ?: '127.0.0.1') . ';charset=utf8mb4',
+    getenv('TEST_DB_USER') ?: 'root',
+    getenv('TEST_DB_PASS') ?: '',
+    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+);
 $pdo->exec("DROP DATABASE IF EXISTS `$dst`");
 $pdo->exec("CREATE DATABASE `$dst` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
 $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
@@ -69,6 +74,9 @@ if (!$isMaria) {
 
 $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/cli/migrations.php') . ' up';
 putenv("DB_NAME=$dst");
+foreach (['TEST_DB_HOST' => 'DB_HOST', 'TEST_DB_USER' => 'DB_USER', 'TEST_DB_PASS' => 'DB_PASS'] as $from => $to) {
+    if (getenv($from) !== false) putenv("$to=" . getenv($from));
+}
 passthru($cmd, $rc);
 if ($rc !== 0) { fwrite(STDERR, "migrations failed ($rc)\n"); exit(1); }
 
