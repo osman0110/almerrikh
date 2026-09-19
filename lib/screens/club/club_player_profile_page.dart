@@ -39,6 +39,7 @@ import 'club_widgets.dart';
 import 'competition_stats_section.dart';
 import 'player_report_preview_page.dart';
 import 'training_load_section.dart';
+import 'staff_screen.dart' show showResetPasswordDialog;
 
 int? _nullableJsonInt(dynamic value) {
   if (value is num) return value.toInt();
@@ -318,6 +319,19 @@ class _ClubPlayerProfilePageState extends State<ClubPlayerProfilePage> {
                     if (isOrgAdmin) ...[
                       const SizedBox(height: 10),
                       _buildAdminReportEntry(),
+                    ],
+                    if (isOrgAdmin && _player!.linkedUserId != null) ...[
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () => showResetPasswordDialog(
+                          context,
+                          userId: _player!.linkedUserId!,
+                          displayName: _player!.fullName,
+                        ),
+                        icon: const Icon(Icons.key_rounded, size: 16),
+                        label: Text(
+                            AppLocalizations.get('reset_password_title')),
+                      ),
                     ],
                     if (canManageInjuryCases) ...[
                       const SizedBox(height: 10),

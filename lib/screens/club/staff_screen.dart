@@ -407,6 +407,198 @@ class _ClubStaffScreenState extends State<ClubStaffScreen>
     );
   }
 
+  InputDecoration _fieldDecoration(String hint) => InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: AppColors.muted),
+        filled: true,
+        fillColor: AppColors.background,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: AppColors.border),
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      );
+
+  // Staff logins are provisioned by the club admin (in-app sign-up was
+  // removed for App Store review). Server enforces owner/admin only.
+  void _showCreateAccountSheet() {
+    String selectedRole = 'coach';
+    final nameCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final passCtrl = TextEditingController();
+    bool busy = false;
+    const fieldStyle = TextStyle(color: AppColors.foreground, fontSize: 14);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.card,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) {
+          Future<void> submit() async {
+            if (busy) return;
+            final name = nameCtrl.text.trim();
+            final email = emailCtrl.text.trim();
+            if (name.isEmpty) {
+              _snack(AppLocalizations.get('error_name_required'));
+              return;
+            }
+            if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+              _snack(AppLocalizations.get('staff_invalid_email'));
+              return;
+            }
+            if (passCtrl.text.length < 6) {
+              _snack(AppLocalizations.get('password_too_short'));
+              return;
+            }
+            setSheetState(() => busy = true);
+            final res = await ApiService.createStaffAccount(
+              name: name,
+              email: email,
+              password: passCtrl.text,
+              staffRole: selectedRole,
+              phone: phoneCtrl.text.trim(),
+            );
+            if (!mounted) return;
+            if (res['success'] == true) {
+              Navigator.of(sheetContext).pop();
+              _snack(AppLocalizations.get('staff_account_created'));
+              _load();
+            } else {
+              setSheetState(() => busy = false);
+              _snack(res['error']?.toString() ??
+                  AppLocalizations.get('error_generic'));
+            }
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 24,
+              top: 20, left: 20, right: 20,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(AppLocalizations.get('staff_create_account_title'),
+                      style: const TextStyle(
+                          color: AppColors.foreground,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16)),
+                  const SizedBox(height: 4),
+                  Text(AppLocalizations.get('staff_create_account_hint'),
+                      style: TextStyle(
+                          color: AppColors.muted, fontSize: 12, height: 1.4)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: nameCtrl,
+                    style: fieldStyle,
+                    decoration:
+                        _fieldDecoration(AppLocalizations.get('staff_full_name')),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    style: fieldStyle,
+                    decoration:
+                        _fieldDecoration(AppLocalizations.get('email_label')),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    style: fieldStyle,
+                    decoration: _fieldDecoration(
+                        AppLocalizations.get('staff_phone_optional')),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: passCtrl,
+                    style: fieldStyle,
+                    decoration: _fieldDecoration(
+                        AppLocalizations.get('new_password_label')),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedRole,
+                        isExpanded: true,
+                        dropdownColor: AppColors.card,
+                        style: fieldStyle,
+                        items: _invitableAccountTypes
+                            .where((r) => r != 'player')
+                            .map((r) => DropdownMenuItem(
+                                  value: r,
+                                  child: Text(_roleLabel(r)),
+                                ))
+                            .toList(),
+                        onChanged: busy
+                            ? null
+                            : (v) {
+                                if (v != null) {
+                                  setSheetState(() => selectedRole = v);
+                                }
+                              },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: busy ? null : submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: AppColors.foreground,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        elevation: 0,
+                      ),
+                      child: busy
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.foreground))
+                          : Text(
+                              AppLocalizations.get('staff_create_account_btn'),
+                              style: const TextStyle(
+                                  fontSize: 15, fontWeight: FontWeight.w800)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showResetPasswordDialog(Map<String, dynamic> member) async {
+    final userId = int.tryParse((member['user_id'] ?? '').toString());
+    if (userId == null) return;
+    await showResetPasswordDialog(
+      context,
+      userId: userId,
+      displayName: (member['name'] ?? '').toString(),
+    );
+  }
+
   Future<void> _confirmRemove(Map<String, dynamic> member) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -454,6 +646,13 @@ class _ClubStaffScreenState extends State<ClubStaffScreen>
               child: Text(AppLocalizations.get('staff_hint'),
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: _showCreateAccountSheet,
+              child: Text(AppLocalizations.get('staff_create_account_title'),
+                  style: const TextStyle(
+                      color: AppColors.primary, fontWeight: FontWeight.w700)),
             ),
           ],
         ),
@@ -527,6 +726,13 @@ class _ClubStaffScreenState extends State<ClubStaffScreen>
                     size: 18,
                   ),
                   onPressed: () => _assignTeam(m),
+                ),
+              if (!isOwner)
+                IconButton(
+                  tooltip: AppLocalizations.get('reset_password_title'),
+                  icon: const Icon(Icons.key_rounded,
+                      color: AppColors.muted, size: 18),
+                  onPressed: () => _showResetPasswordDialog(m),
                 ),
               if (!isOwner)
                 IconButton(
@@ -686,7 +892,10 @@ class _ClubStaffScreenState extends State<ClubStaffScreen>
                   fontSize: 17)),
           actions: [
             TextButton.icon(
-              onPressed: _showCreateSheet,
+              // Staff tab → create a login directly; Codes tab → invite code.
+              onPressed: () => _tabController.index == 0
+                  ? _showCreateAccountSheet()
+                  : _showCreateSheet(),
               icon: const Icon(Icons.add, color: AppColors.primary, size: 18),
               label: Text(AppLocalizations.get('new_btn'),
                   style: const TextStyle(
@@ -755,4 +964,89 @@ class _ClubStaffScreenState extends State<ClubStaffScreen>
       ),
     );
   }
+}
+
+/// Admin-only: sets a temporary password for a staff member or a player
+/// login in the same club (server-enforced; the user's sessions are revoked).
+/// Shared by the staff list and the player management screen.
+Future<void> showResetPasswordDialog(
+  BuildContext context, {
+  required int userId,
+  required String displayName,
+}) async {
+  final passCtrl = TextEditingController();
+  bool busy = false;
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        Future<void> submit() async {
+          if (busy) return;
+          if (passCtrl.text.length < 6) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(AppLocalizations.get('password_too_short'))));
+            return;
+          }
+          setDialogState(() => busy = true);
+          final res = await ApiService.resetUserPassword(
+            userId: userId,
+            newPassword: passCtrl.text,
+          );
+          if (!dialogContext.mounted) return;
+          if (res['success'] == true) {
+            Navigator.of(dialogContext).pop();
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(AppLocalizations.get('reset_password_done'))));
+          } else {
+            setDialogState(() => busy = false);
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(res['error']?.toString() ??
+                    AppLocalizations.get('error_generic'))));
+          }
+        }
+
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: Text(
+            '${AppLocalizations.get('reset_password_title')} — $displayName',
+            style: const TextStyle(color: AppColors.foreground, fontSize: 15),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(AppLocalizations.get('reset_password_hint'),
+                  style: TextStyle(
+                      color: AppColors.muted, fontSize: 12, height: 1.4)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: passCtrl,
+                enabled: !busy,
+                style: const TextStyle(color: AppColors.foreground),
+                decoration: InputDecoration(
+                  labelText: AppLocalizations.get('new_password_label'),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.of(dialogContext).pop(),
+              child: Text(AppLocalizations.get('cancel')),
+            ),
+            TextButton(
+              onPressed: busy ? null : submit,
+              child: busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text(AppLocalizations.get('reset_password_btn')),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+  passCtrl.dispose();
 }

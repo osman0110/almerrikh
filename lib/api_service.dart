@@ -228,6 +228,57 @@ class ApiService {
     }
   }
 
+  /// Admin provisions a staff login directly (owner/admin only, server-enforced).
+  static Future<Map<String, dynamic>> createStaffAccount({
+    required String name,
+    required String email,
+    required String password,
+    required String staffRole,
+    String? phone,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/club/staff.php'),
+        headers: _headers,
+        body: jsonEncode({
+          'action': 'create_account',
+          'name': name,
+          'email': email,
+          'password': password,
+          'staff_role': staffRole,
+          if (phone != null && phone.isNotEmpty) 'phone': phone,
+        }),
+      ).timeout(const Duration(seconds: 15));
+      return _decodeResponse(res);
+    } catch (e) {
+      AppLogger.e('ApiService.createStaffAccount', 'Request failed', e);
+      return {'error': AppLogger.userMessage(e)};
+    }
+  }
+
+  /// Admin sets a temporary password for a staff member or player login in
+  /// the same club. The server revokes that user's sessions.
+  static Future<Map<String, dynamic>> resetUserPassword({
+    required int userId,
+    required String newPassword,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/club/staff.php'),
+        headers: _headers,
+        body: jsonEncode({
+          'action': 'reset_password',
+          'user_id': userId,
+          'new_password': newPassword,
+        }),
+      ).timeout(const Duration(seconds: 15));
+      return _decodeResponse(res);
+    } catch (e) {
+      AppLogger.e('ApiService.resetUserPassword', 'Request failed', e);
+      return {'error': AppLogger.userMessage(e)};
+    }
+  }
+
   static Future<Map<String, dynamic>> assignStaffTeam({
     required String staffId,
     required String teamId,
