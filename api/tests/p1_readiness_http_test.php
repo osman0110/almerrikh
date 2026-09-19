@@ -300,19 +300,23 @@ try {
     file_put_contents("$tmpDir/merr_fcm_access_token.json", json_encode([
         'access_token' => 'fake', 'project_id' => 'fake', 'expires_at' => time() + 3600,
     ]));
-    // Reproduce a prod DB where migration 0012 (device_tokens) never ran:
-    // the push layer then throws after the session is already committed.
-    $hasDeviceTokens = (bool)$pdo->query("SHOW TABLES LIKE 'device_tokens'")->fetchColumn();
-    if ($hasDeviceTokens) { $pdo->exec('RENAME TABLE device_tokens TO device_tokens_p1_hidden'); }
+    // Reproduce a DB where the notifications table is unusable (this is what
+    // migration 0022 fixes): the notification cannot be stored at all, yet the
+    // session must still save. A push-only failure is NOT a notification
+    // failure — the in-app row is what counts.
+    $hasNotifications = (bool)$pdo->query("SHOW TABLES LIKE 'notifications'")->fetchColumn();
+    if ($hasNotifications) { $pdo->exec('RENAME TABLE notifications TO notifications_p1_hidden'); }
     $nid = "p1-sess-n-$seed";
     [$c, $r] = api('POST', 'sessions.php', $tokens['coachA'], array_merge($sessBody, ['id' => $nid]));
     $saved = (int)$pdo->query('SELECT COUNT(*) FROM club_sessions WHERE id = ' . $pdo->quote($nid))->fetchColumn();
     check('B25 save succeeds even when notification delivery fails', $c === 200 && ($r['success'] ?? false) && $saved === 1, [$c, $r, $saved]);
     check('B26 response flags notifications_sent=false (warning, not an error)', ($r['notifications_sent'] ?? null) === false, $r);
+    $stillSaved = (int)$pdo->query('SELECT COUNT(*) FROM club_sessions WHERE id = ' . $pdo->quote($nid))->fetchColumn();
+    check('B26b the session itself is intact despite the notification failure', $stillSaved === 1, $stillSaved);
     [$c, $r] = api('POST', 'sessions.php', $tokens['coachA'], array_merge($sessBody, ['id' => $nid]));
     $saved = (int)$pdo->query('SELECT COUNT(*) FROM club_sessions WHERE id = ' . $pdo->quote($nid))->fetchColumn();
     check('B27 user retry after the warning does not duplicate', $c === 200 && $saved === 1, [$c, $r, $saved]);
-    if ($hasDeviceTokens) { $pdo->exec('RENAME TABLE device_tokens_p1_hidden TO device_tokens'); }
+    if ($hasNotifications) { $pdo->exec('RENAME TABLE notifications_p1_hidden TO notifications'); }
     @unlink("$tmpDir/merr_fcm_access_token.json");
 
     [$c, $r] = api('DELETE', 'sessions.php?id=' . urlencode($nid), $tokens['coachB']);
@@ -532,7 +536,7 @@ try {
 } catch (Throwable $e) {
     check('harness', false, get_class($e) . ': ' . $e->getMessage() . ' @' . $e->getLine());
 } finally {
-    try { if ((bool)$pdo->query("SHOW TABLES LIKE 'device_tokens_p1_hidden'")->fetchColumn()) $pdo->exec('RENAME TABLE device_tokens_p1_hidden TO device_tokens'); } catch (Throwable $e) {}
+    try { if ((bool)$pdo->query("SHOW TABLES LIKE 'notifications_p1_hidden'")->fetchColumn()) $pdo->exec('RENAME TABLE notifications_p1_hidden TO notifications'); } catch (Throwable $e) {}
     // ── Cleanup: everything created under the two fixture clubs / users ──────
     $clubList = "$clubA,$clubB";
     $extra = $pdo->query("SELECT id FROM users WHERE club_id IN ($clubList)")->fetchAll(PDO::FETCH_COLUMN);
