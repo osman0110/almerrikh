@@ -96,8 +96,13 @@ function getFcmAccessToken(): ?array {
     return ['access_token' => $data['access_token'], 'project_id' => $account['project_id']];
 }
 
-/** Sends one FCM v1 message to a single token. Returns true on success. */
-function fcmSendToToken(string $accessToken, string $projectId, string $token, string $title, string $body, array $data = []): bool {
+/**
+ * Sends one FCM v1 message to a single token.
+ * Returns 'sent', 'invalid_token' (FCM says the token is dead — safe to
+ * prune) or 'error' (network failure, FCM outage, auth/config problem —
+ * the token itself may be fine, so it must NOT be pruned).
+ */
+function fcmSendToToken(string $accessToken, string $projectId, string $token, string $title, string $body, array $data = []): string {
     $payload = [
         'message' => [
             'token' => $token,
@@ -118,51 +123,94 @@ function fcmSendToToken(string $accessToken, string $projectId, string $token, s
         CURLOPT_TIMEOUT        => 10,
     ]);
     $response = curl_exec($ch);
+    $curlError = curl_error($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
-    if ($httpCode === 200) return true;
-
-    if (in_array($httpCode, [400, 404], true) && str_contains((string)$response, 'UNREGISTERED')) {
-        // Stale token — caller prunes it.
-        return false;
-    }
-    error_log("[push] FCM send failed ($httpCode): $response");
-    return false;
+    return fcmClassifyResponse((int)$httpCode, $response === false ? '' : (string)$response, $curlError);
 }
 
-/** Sends a push to every device registered for a user, pruning dead tokens. */
-function sendPushToUser(PDO $pdo, int $userId, string $title, string $body, array $data = []): void {
+/** Pure classification of an FCM send result (unit-tested). */
+function fcmClassifyResponse(int $httpCode, string $response, string $curlError = ''): string {
+    if ($httpCode === 200) return 'sent';
+    if ($httpCode === 0) {
+        error_log('[push] FCM network error: ' . ($curlError !== '' ? $curlError : 'no response'));
+        return 'error';
+    }
+    // Only these mean "this device token is dead" per the FCM v1 docs.
+    if (in_array($httpCode, [400, 404], true)
+        && (str_contains($response, 'UNREGISTERED')
+            || (str_contains($response, 'INVALID_ARGUMENT') && str_contains($response, 'token')))) {
+        error_log("[push] FCM rejected token as invalid ($httpCode) — pruning");
+        return 'invalid_token';
+    }
+    error_log("[push] FCM send failed ($httpCode): $response");
+    return 'error';
+}
+
+/**
+ * Sends a push to every device registered for a user, pruning only tokens
+ * FCM explicitly reports as invalid. Returns a short outcome for logging:
+ * 'sent' | 'no_credentials' | 'no_device_token' | 'failed' | 'partial'.
+ */
+function sendPushToUser(PDO $pdo, int $userId, string $title, string $body, array $data = []): string {
     $auth = getFcmAccessToken();
-    if (!$auth) return;
+    if (!$auth) {
+        error_log("[push] user $userId: FCM credentials missing/unusable — push skipped");
+        return 'no_credentials';
+    }
 
     $stmt = $pdo->prepare('SELECT id, token FROM device_tokens WHERE user_id = ?');
     $stmt->execute([$userId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    if (!$rows) return;
+    if (!$rows) {
+        error_log("[push] user $userId: no device token registered");
+        return 'no_device_token';
+    }
 
+    $sent = 0;
     foreach ($rows as $row) {
-        $ok = fcmSendToToken($auth['access_token'], $auth['project_id'], $row['token'], $title, $body, $data);
-        if (!$ok) {
+        $result = fcmSendToToken($auth['access_token'], $auth['project_id'], $row['token'], $title, $body, $data);
+        if ($result === 'sent') {
+            $sent++;
+        } elseif ($result === 'invalid_token') {
             $pdo->prepare('DELETE FROM device_tokens WHERE id = ?')->execute([$row['id']]);
         }
     }
+    error_log("[push] user $userId: sent to $sent/" . count($rows) . ' device(s)');
+    if ($sent === count($rows)) return 'sent';
+    return $sent === 0 ? 'failed' : 'partial';
 }
 
 /**
  * Sends a push to every active staff member with a given staff_role in a
  * club — translated per-recipient via notificationText(), since a role
  * broadcast fans out to staff who may each have a different app language.
+ * Never throws: like createNotification(), it is a side effect of an
+ * already-saved write.
  */
-function notifyClubRole(PDO $pdo, int $clubId, string $staffRole, string $type, array $params, array $data = []): void {
-    $stmt = $pdo->prepare(
-        "SELECT user_id FROM club_staff WHERE club_id = ? AND staff_role = ? AND status = 'active'"
-    );
-    $stmt->execute([$clubId, $staffRole]);
-    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $userId) {
-        $userId = (int)$userId;
-        $lang = notificationLang($pdo, $userId);
-        $text = notificationText($type, $params, $lang);
-        sendPushToUser($pdo, $userId, $text['title'], $text['body'], $data);
+function notifyClubRole(PDO $pdo, int $clubId, string $staffRole, string $type, array $params, array $data = []): bool {
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT user_id FROM club_staff WHERE club_id = ? AND staff_role = ? AND status = 'active'"
+        );
+        $stmt->execute([$clubId, $staffRole]);
+        $userIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    } catch (Throwable $e) {
+        error_log("[push] notifyClubRole($staffRole) lookup failed: " . $e->getMessage());
+        return false;
     }
+    $ok = true;
+    foreach ($userIds as $userId) {
+        $userId = (int)$userId;
+        try {
+            $lang = notificationLang($pdo, $userId);
+            $text = notificationText($type, $params, $lang);
+            sendPushToUser($pdo, $userId, $text['title'], $text['body'], $data);
+        } catch (Throwable $e) {
+            $ok = false;
+            error_log("[push] notifyClubRole($staffRole) user $userId failed: " . $e->getMessage());
+        }
+    }
+    return $ok;
 }

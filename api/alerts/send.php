@@ -86,11 +86,20 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $recipientIds = array_unique(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
 
+// Here the notification IS the operation, so report what actually got
+// delivered instead of claiming success for recipients whose row failed.
+$sentCount = 0;
 foreach ($recipientIds as $recipientUserId) {
-    createNotification($pdo, $clubId, $recipientUserId, 'coach_alert', [
+    if (createNotification($pdo, $clubId, $recipientUserId, 'coach_alert', [
         'title'    => $title,
         'raw_body' => $message,
-    ], '/club/notifications');
+    ], '/club/notifications')) {
+        $sentCount++;
+    }
+}
+$failedCount = count($recipientIds) - $sentCount;
+if ($recipientIds && $sentCount === 0) {
+    jsonOut(['success' => false, 'message' => 'Alert could not be delivered', 'failed_count' => $failedCount], 500);
 }
 
-jsonOut(['success' => true, 'sent_count' => count($recipientIds)]);
+jsonOut(['success' => true, 'sent_count' => $sentCount, 'failed_count' => $failedCount]);
