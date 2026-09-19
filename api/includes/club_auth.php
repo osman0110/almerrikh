@@ -220,3 +220,65 @@ function requireClubPermission(PDO $pdo, array $user, string $action): array {
     }
     return $ctx;
 }
+
+// ── Record ownership (sessions, assessments) ─────────────────────────────────
+// Business rule (2026-09-19): a training session / assessment belongs to the
+// coach who created it (its user_id); the club is only the tenant boundary.
+// Another coach in the same club does NOT get write access automatically —
+// only the record's creator or a club owner/admin (the '*' roles) may change
+// it. Reads stay club-scoped.
+function isClubAdminRole(?string $staffRole): bool {
+    return in_array($staffRole, ['owner', 'admin'], true);
+}
+
+function canManageOwnedRecord(array $ctx, array $user, array $record): bool {
+    if ((int)($record['club_id'] ?? 0) !== (int)($ctx['club_id'] ?? -1)) return false;
+    if (isClubAdminRole($ctx['staff_role'] ?? null)) return true;
+    return (int)($record['user_id'] ?? 0) === (int)$user['id'];
+}
+
+// Loads a club_sessions row for a write and enforces ownership:
+//   not in the caller's club → 404 (never confirm another club's data exists)
+//   in the club, not owner   → 403
+function requireManageableSession(PDO $pdo, array $user, array $ctx, string $sessionId): array {
+    $stmt = $pdo->prepare('SELECT * FROM club_sessions WHERE id = ? AND club_id = ?');
+    $stmt->execute([$sessionId, $ctx['club_id']]);
+    $session = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$session) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Session not found'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if (!canManageOwnedRecord($ctx, $user, $session)) {
+        http_response_code(403);
+        echo json_encode([
+            'error' => 'Forbidden — only the coach who owns this session can change it',
+            'code'  => 'not_session_owner',
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    return $session;
+}
+
+// ── Medical information: two levels ──────────────────────────────────────────
+// Full medical text (club_players.medical_notes / injury_notes, injury-case
+// diagnosis & exam notes) is only for roles with 'medical_detail.read'
+// (doctor, physiotherapist, owner/admin). Everyone else — including the
+// physical coach — gets availability fields only (status,
+// unavailable_reason, expected_return_date, player_daily_decisions
+// restrictions) plus a boolean saying notes exist. Enforced server-side:
+// the text never leaves the API for those roles.
+function canReadMedicalDetail(array $ctx): bool {
+    return clubStaffCan((string)($ctx['staff_role'] ?? ''), 'medical_detail.read');
+}
+
+function redactMedicalFields(array &$row, array $ctx): void {
+    if (canReadMedicalDetail($ctx)) {
+        $row['medical_detail_hidden'] = false;
+        return;
+    }
+    $row['has_injury_notes'] = trim((string)($row['injury_notes'] ?? '')) !== '';
+    $row['injury_notes'] = null;
+    $row['medical_notes'] = null;
+    $row['medical_detail_hidden'] = true;
+}

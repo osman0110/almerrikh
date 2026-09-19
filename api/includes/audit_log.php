@@ -27,6 +27,27 @@ function logAudit(
 }
 
 /**
+ * Best-effort variant for audit rows written AFTER the business write has
+ * already been committed: an audit failure is logged, never surfaced as a
+ * failure of the (already saved) operation.
+ */
+function logAuditSafe(
+    PDO $pdo,
+    string $entityType,
+    string $entityId,
+    string $fieldName,
+    ?string $oldValue,
+    ?string $newValue,
+    int $changedByUserId
+): void {
+    try {
+        logAudit($pdo, $entityType, $entityId, $fieldName, $oldValue, $newValue, $changedByUserId);
+    } catch (Throwable $e) {
+        error_log("[audit] $entityType/$entityId/$fieldName not logged: " . $e->getMessage());
+    }
+}
+
+/**
  * Diffs a set of $fields (name => newValue) against $oldRow (assoc array,
  * or null if the entity didn't exist yet) and logs each real change.
  */
