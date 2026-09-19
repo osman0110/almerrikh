@@ -219,8 +219,8 @@ function findSessionConflictsForPlayer(
 
 /** Merge a physio_sessions row + a physio_session_players row into the flat
  *  wire shape every client already consumes. */
-function sessionOut(array $s, array $pp): array {
-    return [
+function sessionOut(array $s, array $pp, ?array $ctx = null): array {
+    $out = [
         'id'                => (string)$pp['id'],
         'session_id'        => (string)$s['id'],
         'player_id'         => $pp['player_id'],
@@ -241,6 +241,18 @@ function sessionOut(array $s, array $pp): array {
         'created_at'        => $s['created_at'],
         'updated_at'        => $pp['updated_at'],
     ];
+
+    // Decision 2026-09-20: the physical coach / performance manager see the
+    // treatment SUMMARY — when, how long, where, body area, reason, treatment
+    // type and the resulting recommendation (rest / modified training / …) —
+    // but never the specialist's clinical narrative about the player.
+    if ($ctx !== null && !canReadMedicalDetail($ctx)) {
+        $out['specialist_notes'] = null;
+        $out['player_response'] = null;
+        $out['medical_detail_hidden'] = true;
+    }
+
+    return $out;
 }
 
 $SESSION_FIELDS = "s.id AS s_id, s.club_id AS s_club_id, s.therapist_user_id AS s_therapist_user_id,
@@ -289,7 +301,7 @@ if ($method === 'GET') {
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) jsonOut(['success' => false, 'message' => 'Not found'], 404);
         [$s, $pp] = splitJoinedRow($row);
-        jsonOut(['success' => true, 'session' => sessionOut($s, $pp)]);
+        jsonOut(['success' => true, 'session' => sessionOut($s, $pp, $ctx ?? null)]);
     }
 
     $date = trim($_GET['date'] ?? '');
@@ -307,7 +319,7 @@ if ($method === 'GET') {
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         jsonOut(['success' => true, 'sessions' => array_map(function ($row) {
             [$s, $pp] = splitJoinedRow($row);
-            $out = sessionOut($s, $pp);
+            $out = sessionOut($s, $pp, $ctx ?? null);
             $out['player_name'] = $row['player_name'];
             $out['therapist_name'] = $row['therapist_name'];
             return $out;
@@ -334,7 +346,7 @@ if ($method === 'GET') {
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         jsonOut(['success' => true, 'sessions' => array_map(function ($row) {
             [$s, $pp] = splitJoinedRow($row);
-            $out = sessionOut($s, $pp);
+            $out = sessionOut($s, $pp, $ctx ?? null);
             $out['player_name'] = $row['player_name'];
             $out['therapist_name'] = $row['therapist_name'];
             return $out;
@@ -351,7 +363,7 @@ if ($method === 'GET') {
     $stmt->execute([$playerId, $ctx['club_id']]);
     jsonOut(['success' => true, 'sessions' => array_map(function ($row) {
         [$s, $pp] = splitJoinedRow($row);
-        return sessionOut($s, $pp);
+        return sessionOut($s, $pp, $ctx ?? null);
     }, $stmt->fetchAll(PDO::FETCH_ASSOC))]);
 }
 

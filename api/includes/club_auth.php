@@ -89,6 +89,7 @@ function clubStaffCan(string $staffRole, string $action): bool {
             'fms.write',
             'notes.read', 'notes.write',
             'medical.read',
+            'medical_summary.read',
             'teams.read',
             'seasons.read', 'competitions.read',
             'physio_sessions.read',
@@ -143,6 +144,7 @@ function clubStaffCan(string $staffRole, string $action): bool {
             'assessments.read', 'assessments.write',
             'notes.read', 'notes.write',
             'medical.read', 'medical.write',
+            'medical_summary.read',
             'teams.read', 'teams.write',
             'seasons.read', 'seasons.write', 'competitions.read', 'competitions.write',
             'management_report.view',
@@ -211,6 +213,10 @@ function clubStaffCan(string $staffRole, string $action): bool {
     ];
 
     $allowed = $capabilities[$staffRole] ?? [];
+    // Full medical access always includes the summary level.
+    if ($action === 'medical_summary.read' && in_array('medical_detail.read', $allowed, true)) {
+        return true;
+    }
     if (in_array($action, EXPLICIT_ONLY_ACTIONS, true)) {
         return in_array($action, $allowed, true);
     }
@@ -285,13 +291,24 @@ function canReadMedicalDetail(array $ctx): bool {
     return clubStaffCan((string)($ctx['staff_role'] ?? ''), 'medical_detail.read');
 }
 
+// Injury/treatment SUMMARY (decision 2026-09-20): the physical coach and
+// performance manager need the injury picture to plan training — body
+// location, injury type, severity, return-to-play stage, physio schedule and
+// status, and the short injury note. They still never get the clinical
+// content: doctor diagnosis, exam notes, specialist notes or medical_notes.
+function canReadMedicalSummary(array $ctx): bool {
+    return canReadMedicalDetail($ctx)
+        || clubStaffCan((string)($ctx['staff_role'] ?? ''), 'medical_summary.read');
+}
+
 function redactMedicalFields(array &$row, array $ctx): void {
     if (canReadMedicalDetail($ctx)) {
         $row['medical_detail_hidden'] = false;
         return;
     }
     $row['has_injury_notes'] = trim((string)($row['injury_notes'] ?? '')) !== '';
-    $row['injury_notes'] = null;
+    // Summary roles keep the short injury note; everyone else loses it too.
+    if (!canReadMedicalSummary($ctx)) $row['injury_notes'] = null;
     $row['medical_notes'] = null;
     $row['medical_detail_hidden'] = true;
 }

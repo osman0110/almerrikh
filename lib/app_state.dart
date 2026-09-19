@@ -145,6 +145,19 @@ bool get canViewMedicalNotes =>
     currentOrgRole == OrgRole.doctor ||
     currentOrgRole == OrgRole.physiotherapist;
 
+/// True when the role may see the injury/treatment SUMMARY (decision
+/// 2026-09-20): body location, injury type, severity, return-to-play stage,
+/// physio schedule and status, and the short injury note — so the physical
+/// coach and performance manager can plan training. The clinical content
+/// (diagnosis, exam notes, specialist notes, medical_notes) still needs
+/// [canViewMedicalNotes]. Mirrors 'medical_summary.read' server-side, which
+/// is what actually enforces it.
+bool get canViewMedicalSummary =>
+    canViewMedicalNotes ||
+    isCoachRole ||
+    currentOrgRole == OrgRole.performanceManager ||
+    isOrgAdmin;
+
 /// True when the org role is dedicated medical/treatment staff
 /// (doctor, physiotherapist — covers physio & massage).
 bool get isMedicalStaff =>

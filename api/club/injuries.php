@@ -56,8 +56,8 @@ const VALID_SEVERITY = ['mild', 'moderate', 'severe'];
 const VALID_CASE_STATUS = ['open', 'in_treatment', 'rehab', 'graduated', 'closed'];
 const VALID_RTP_STAGE = ['rest', 'light_activity', 'running', 'noncontact_training', 'full_training', 'match_ready'];
 
-function caseOut(array $c): array {
-    return [
+function caseOut(array $c, ?array $ctx = null): array {
+    $out = [
         'id'                   => (string)$c['id'],
         'player_id'            => $c['player_id'],
         'injury_date'          => $c['injury_date'],
@@ -73,6 +73,18 @@ function caseOut(array $c): array {
         'created_at'           => $c['created_at'],
         'updated_at'           => $c['updated_at'],
     ];
+
+    // Decision 2026-09-20: the physical coach / performance manager see the
+    // injury SUMMARY (body location, type, severity, RTP stage, return dates)
+    // so they can plan training. The doctor's diagnosis and exam notes stay
+    // with medical staff ('medical_detail.read').
+    if ($ctx !== null && !canReadMedicalDetail($ctx)) {
+        $out['diagnosis'] = null;
+        $out['exam_notes'] = null;
+        $out['medical_detail_hidden'] = true;
+    }
+
+    return $out;
 }
 
 $method = $_SERVER['REQUEST_METHOD'];
@@ -84,7 +96,9 @@ if (in_array($user['role'] ?? '', ['player', 'parent'], true)) {
 
 // ── GET ──────────────────────────────────────────────────────────────────────
 if ($method === 'GET') {
-    $ctx = requireClubPermission($pdo, $user, 'medical_detail.read');
+    // Summary roles may read the case list/detail; caseOut() strips the
+    // clinical fields for anyone without 'medical_detail.read'.
+    $ctx = requireClubPermission($pdo, $user, 'medical_summary.read');
 
     $id = trim($_GET['id'] ?? '');
     if ($id) {
@@ -93,7 +107,7 @@ if ($method === 'GET') {
         $case = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$case) jsonOut(['success' => false, 'message' => 'Not found'], 404);
 
-        $result = ['success' => true, 'case' => caseOut($case)];
+        $result = ['success' => true, 'case' => caseOut($case, $ctx)];
 
         if (($_GET['updates'] ?? '') === '1') {
             $uStmt = $pdo->prepare(
@@ -104,10 +118,12 @@ if ($method === 'GET') {
                  ORDER BY u.created_at DESC'
             );
             $uStmt->execute([$id]);
-            $result['updates'] = array_map(function ($u) {
+            $canReadDetail = canReadMedicalDetail($ctx);
+            $result['updates'] = array_map(function ($u) use ($canReadDetail) {
                 return [
                     'id'           => (string)$u['id'],
-                    'note'         => $u['note'],
+                    // Free-text update notes are clinical narrative.
+                    'note'         => $canReadDetail ? $u['note'] : null,
                     'rtp_stage'    => $u['rtp_stage'],
                     'case_status'  => $u['case_status'],
                     'author_name'  => $u['author_name'],
@@ -126,7 +142,10 @@ if ($method === 'GET') {
         'SELECT * FROM injury_cases WHERE player_id = ? AND club_id = ? ORDER BY injury_date DESC, id DESC'
     );
     $stmt->execute([$playerId, $ctx['club_id']]);
-    jsonOut(['success' => true, 'cases' => array_map('caseOut', $stmt->fetchAll(PDO::FETCH_ASSOC))]);
+    jsonOut(['success' => true, 'cases' => array_map(
+        static fn(array $row) => caseOut($row, $ctx),
+        $stmt->fetchAll(PDO::FETCH_ASSOC)
+    )]);
 }
 
 // ── POST ─────────────────────────────────────────────────────────────────────

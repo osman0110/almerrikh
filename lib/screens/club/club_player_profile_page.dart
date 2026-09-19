@@ -137,7 +137,7 @@ class _ClubPlayerProfilePageState extends State<ClubPlayerProfilePage> {
               : Future.value(<ClubSessionExercise>[]),
           // Live status badges for the specialty entry cards below — only
           // fetched for roles that can actually see that card.
-          canManageInjuryCases
+          canViewMedicalSummary
               ? ApiService.getInjuryCases(player.id)
               : Future.value(<Map<String, dynamic>>[]),
           canManagePhysioSessions
@@ -334,7 +334,9 @@ class _ClubPlayerProfilePageState extends State<ClubPlayerProfilePage> {
                             AppLocalizations.get('reset_password_title')),
                       ),
                     ],
-                    if (canManageInjuryCases) ...[
+                    // Coach/performance manager open it read-only (the screen
+                    // hides every write action behind canManageInjuryCases).
+                    if (canViewMedicalSummary) ...[
                       const SizedBox(height: 10),
                       _buildInjuryFileEntry(),
                     ],
@@ -5339,7 +5341,7 @@ class _ReadinessAndFlagsSectionState extends State<_ReadinessAndFlagsSection>
         if (_expanded &&
             (allowedDuration != null ||
               restrictions?.isNotEmpty == true ||
-              (canViewMedicalNotes &&
+              (canViewMedicalSummary &&
                   player.injuryNotes?.isNotEmpty == true) ||
               player.expectedReturnDate != null ||
               player.unavailableReason?.isNotEmpty == true)) ...[
@@ -5366,7 +5368,7 @@ class _ReadinessAndFlagsSectionState extends State<_ReadinessAndFlagsSection>
                   ),
                 ),
               ),
-            if (canViewMedicalNotes &&
+            if (canViewMedicalSummary &&
                 player.injuryNotes?.isNotEmpty == true)
               Padding(
                 padding: EdgeInsets.only(
