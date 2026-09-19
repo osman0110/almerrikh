@@ -149,6 +149,7 @@ try {
     $mkStaff('coachB', $clubA, 'coach');
     $mkStaff('doctorA', $clubA, 'doctor');
     $mkStaff('analystA', $clubA, 'analyst');
+    $mkStaff('pmA', $clubA, 'performance_manager');
     $mkStaff('coachC', $clubB, 'coach');
     $p1 = $mkPlayer('player1', $clubA, $ownerA, true);
     $p2 = $mkPlayer('player2', $clubA, $ownerA, true);
@@ -162,6 +163,14 @@ try {
                 'symmetry_score' => 73, 'control_score' => 74, 'quality_score' => 80];
     [$c, $r] = api('POST', 'assessments.php', $tokens['coachA'], $asmBody);
     check('A1 coach A records assessment for player 1', $c === 200 && ($r['success'] ?? false), [$c, $r]);
+
+    // Visibility rule 2026-09-19: players see only coach-approved results.
+    [$c, $r] = api('GET', 'player/assessments.php', $tokens['player1']);
+    $ids = array_column($r['assessments'] ?? [], 'id');
+    check('A1b pending (unapproved) assessment is NOT shown to the player', $c === 200 && !in_array($asmId, $ids, true), [$c, $ids]);
+
+    [$c, $r] = api('POST', 'assessments.php', $tokens['coachA'], ['action' => 'approve', 'id' => $asmId]);
+    check('A1c recording coach approves the assessment', $c === 200 && ($r['status'] ?? '') === 'approved', [$c, $r]);
 
     [$c, $r] = api('GET', 'player/assessments.php', $tokens['player1']);
     $ids = array_column($r['assessments'] ?? [], 'id');
@@ -347,6 +356,18 @@ try {
     $row = $pdo->query('SELECT medical_notes, name FROM club_players WHERE id = ' . $pdo->quote($p1))->fetch();
     check('C8 doctor can update medical notes (identity fields untouched)', $c === 200 && $row['medical_notes'] === 'Cleared for jogging' && $row['name'] === 'Player player1', [$c, $r, $row]);
 
+    // Rule 2026-09-19: owner/admin and performance manager do NOT get full
+    // medical text from the API (no wildcard medical access).
+    foreach (['adminA' => 'C9 admin', 'ownerA' => 'C10 owner', 'pmA' => 'C11 performance manager'] as $who => $label) {
+        [$c, $r] = api('GET', 'players.php?id=' . urlencode($p1), $tokens[$who]);
+        check("$label does NOT receive medical/injury note text", $c === 200 && !str_contains(json_encode($r), 'Cleared for jogging') && !str_contains(json_encode($r), 'Left hamstring'), [$c]);
+    }
+    [$c, $r] = api('GET', 'club/injuries.php?player_id=' . urlencode($p1), $tokens['adminA']);
+    check('C12 admin cannot open the clinical injury file (403)', $c === 403, [$c, $r]);
+    [$c, $r] = api('POST', 'players.php', $tokens['adminA'], ['id' => $p1, 'name' => 'Player player1', 'status' => 'injured', 'medical_notes' => 'admin overwrite', 'injury_notes' => null]);
+    $row = $pdo->query('SELECT medical_notes, injury_notes FROM club_players WHERE id = ' . $pdo->quote($p1))->fetch();
+    check('C13 admin player edit cannot overwrite or wipe medical notes', $c === 200 && $row['medical_notes'] === 'Cleared for jogging' && $row['injury_notes'] === 'Left hamstring', [$c, $r, $row]);
+
     // ── D. Staff accounts, password reset, suspension ────────────────────────
     $newEmail = "p1_newcoach_{$seed}@test.invalid";
     [$c, $r] = api('POST', 'club/staff.php', $tokens['adminA'], ['action' => 'create_account', 'name' => 'New Coach', 'email' => $newEmail, 'password' => 'Start-123', 'staff_role' => 'coach']);
@@ -369,6 +390,27 @@ try {
 
     [$c, $r] = api('POST', 'club/staff.php', $tokens['coachA'], ['action' => 'create_account', 'name' => 'X', 'email' => "p1_x_{$seed}@test.invalid", 'password' => 'Start-123', 'staff_role' => 'coach']);
     check('D6 coach cannot create staff accounts (403)', $c === 403, [$c, $r]);
+
+    // Privilege escalation: only the owner creates admins (account or invite).
+    [$c, $r] = api('POST', 'club/staff.php', $tokens['adminA'], ['action' => 'create_account', 'name' => 'Adm', 'email' => "p1_adm_{$seed}@test.invalid", 'password' => 'Start-123', 'staff_role' => 'admin']);
+    check('D6a admin cannot create an admin account (403)', $c === 403 && ($r['code'] ?? '') === 'owner_only', [$c, $r]);
+    [$c, $r] = api('POST', 'club/staff.php', $tokens['adminA'], ['account_type' => 'admin']);
+    check('D6b admin cannot create an admin invite code (403)', $c === 403, [$c, $r]);
+    [$c, $r] = api('POST', 'club/staff.php', $tokens['ownerA'], ['account_type' => 'admin']);
+    $adminCode = $r['code'] ?? '';
+    check('D6c owner can create an admin invite code', $c === 200 && $adminCode !== '', [$c, $r]);
+    api('POST', 'club/staff.php', $tokens['ownerA'], ['action' => 'toggle_code', 'code' => $adminCode, 'is_active' => false]);
+    [$c, $r] = api('POST', 'club/staff.php', $tokens['adminA'], ['action' => 'toggle_code', 'code' => $adminCode, 'is_active' => true]);
+    check('D6d admin cannot re-activate an admin invite (403)', $c === 403, [$c, $r]);
+    [$c, $r] = api('POST', 'club/staff.php', $tokens['ownerA'], ['action' => 'create_account', 'name' => 'Adm2', 'email' => "p1_adm2_{$seed}@test.invalid", 'password' => 'Start-123', 'staff_role' => 'admin']);
+    if (!empty($r['user_id'])) $userIds['admin2'] = (int)$r['user_id'];
+    check('D6e owner can create an admin account', $c === 200 && !empty($r['user_id']), [$c, $r]);
+    $admin2Row = (int)$pdo->query('SELECT id FROM club_staff WHERE user_id = ' . (int)($userIds['admin2'] ?? 0))->fetchColumn();
+    [$c, $r] = api('DELETE', 'club/staff.php?id=' . $admin2Row, $tokens['adminA']);
+    check('D6f admin cannot suspend another admin (403)', $c === 403, [$c, $r]);
+    $selfRow = (int)$pdo->query('SELECT id FROM club_staff WHERE user_id = ' . (int)$userIds['adminA'])->fetchColumn();
+    $roleBefore = $pdo->query('SELECT staff_role FROM club_staff WHERE id = ' . $selfRow)->fetchColumn();
+    check('D6g no endpoint path changed the admin role (no self-promotion)', $roleBefore === 'admin', $roleBefore);
 
     [$c, $r] = api('POST', 'club/staff.php', $tokens['adminA'], ['action' => 'reset_password', 'user_id' => $newUserId, 'new_password' => 'Reset-456']);
     check('D7 admin resets the new coach password', $c === 200, [$c, $r]);
@@ -439,6 +481,7 @@ try {
         "DELETE FROM user_tokens WHERE user_id IN ($uids)",
         "DELETE FROM account_deletions WHERE user_id IN ($uids)",
         "DELETE FROM users WHERE id IN ($uids)",
+        "DELETE FROM club_access_codes WHERE club_id IN ($clubList)",
         "DELETE FROM clubs WHERE id IN ($clubList)",
         "DELETE FROM auth_rate_limit WHERE ip = '127.0.0.1'",
     ];
