@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../app_colors.dart';
 import '../../app_localizations.dart';
+import '../../app_state.dart';
 import '../../models/player_profile_model.dart';
 import '../../api_service.dart';
 import '../../services/player_service.dart';
@@ -86,8 +87,13 @@ class _PlayerProfileFormPageState extends State<PlayerProfileFormPage> {
             const SizedBox(height: 12),
             _buildInput(label: AppLocalizations.get('player_dominant_foot_label'), controller: dominantFootController),
             const SizedBox(height: 12),
-            _buildInput(label: AppLocalizations.get('player_injury_notes_label'), controller: notesController, maxLines: 4),
-            const SizedBox(height: 20),
+            // Injury note text is medical-staff only (the API ignores it
+            // from other roles), so do not offer a field whose input vanishes.
+            if (canViewMedicalNotes) ...[
+              _buildInput(label: AppLocalizations.get('player_injury_notes_label'), controller: notesController, maxLines: 4),
+              const SizedBox(height: 20),
+            ] else
+              const SizedBox(height: 8),
             PrimaryButton(
               label: AppLocalizations.get('save_btn'),
               onTap: _saveProfile,
