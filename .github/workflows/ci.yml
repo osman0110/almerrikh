@@ -56,3 +56,4 @@ jobs:
           php api/tests/p0_sessions_write_permission_test.php
           php api/tests/p0_rbac_capability_matrix_test.php
           php api/tests/training_load_calculator_pure_test.php
+          php api/tests/p1_notification_isolation_test.php
