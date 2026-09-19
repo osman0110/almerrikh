@@ -1,4 +1,5 @@
 import 'dart:async' show unawaited;
+import '../services/notification_service.dart';
 
 import 'package:flutter/material.dart';
 
@@ -189,6 +190,12 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
       if (auth.trialEndsAt != null) {
         await OnboardingStore().setTrialEndsAt(auth.trialEndsAt);
       }
+
+      // Register this device for push right after signing in. Previously
+      // this only ran in RootGate on a later app start, so a freshly signed-in
+      // device stayed unregistered (device_tokens empty) and never received
+      // notifications until the app was restarted.
+      unawaited(NotificationService.registerPush());
 
       if (!mounted) return;
       setState(() => busy = false);
