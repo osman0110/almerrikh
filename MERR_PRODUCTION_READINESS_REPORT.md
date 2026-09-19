@@ -705,3 +705,97 @@ APP_ENV=test TEST_DB_NAME=smart_sport_p1_test_20260919 php api/tests/p1_readines
 **`READY FOR STAGING UAT`**
 
 الكود جاهز للنشر على Staging وتنفيذ سيناريو UAT الكامل (24 خطوة، مع استبدال SLB بالـ Squat في الخطوة 9). لا يُنشر على الإنتاج قبل: رفع الملفات المذكورة، والتحقق من Migrations و `device_tokens` و FCM على السيرفر، ونجاح UAT بحسابات Admin و Coach A و Coach B وطبيب و 3 لاعبين، واختبار الجهاز للبنود أعلاه.
+
+---
+
+# Staging Readiness — Phase 2 (2026-09-19)
+
+نص الطلب وصل مقطوعاً بعد البند 17 («لا يمكن تشغيله»)، فنُفّذت البنود 1–17 كاملة. أما Staging و UAT والنشر فتحتاج وصولاً للسيرفر ولأجهزة فعلية، وهو غير متاح من هذه البيئة، لذلك وُثّقت كمتطلبات مفتوحة ولم يُدَّعَ تنفيذها.
+
+## Executive Summary
+
+**Production Readiness Score: 85/100**, والحالة **`READY FOR STAGING UAT`**.
+أُغلقت القرارات المفتوحة الأربعة، وأُخفيت اختبارات الـ AI بمفتاح مركزي واحد بدون حذف أي شيء. كل قاعدة جديدة مفروضة في الـ API ولها اختبار انحدار.
+
+## Decisions closed (مُطبّقة ومُختبرة)
+
+| القرار | التطبيق | التحقق |
+|---|---|---|
+| **اللاعب يرى التقييمات المعتمدة فقط** (`approved`). مسار الاعتماد حقيقي: زر «اعتماد» في شاشة النتيجة، ويحذف فيديو الجهاز بعده، والحالة الافتراضية `pending_review` | كل الاستعلامات الموجهة للاعب: `player/assessments.php`، `assessments.php` (القائمة + المحاولات)، `my-profile`، `reports/my-progress`، `ai-plan/generate`، `ai/generate-plan`. **استثناء:** ما سجّله اللاعب لنفسه (لاعب مستقل) يبقى ظاهراً له | HTTP A1b, A1c, A2–A4 |
+| **owner/admin لا يرون النص الطبي تلقائياً.** `medical_detail.read/write` صارتا `EXPLICIT_ONLY_ACTIONS` لا تشملهما صلاحية `*`. تُمنحان صراحة للطبيب وأخصائي العلاج الطبيعي والتدليك فقط، وهذا يطابق التعليقات الموثقة أصلاً في `injuries.php` و `rehab_phases.php` | `includes/club_auth.php` | HTTP C9–C13، `p0_rbac_capability_matrix_test` (حُدِّث بسبب قرار العمل، ولم يُحذف منه شيء) |
+| **مدير الأداء لا يرى النص الطبي**، ويرى الجاهزية والتوفر والقيود وحالة العودة | كان مطبّقاً في المرحلة السابقة، وأُضيف له اختبار | HTTP C11 |
+| **owner فقط ينشئ admin:** سواء بإنشاء حساب مباشر، أو برمز دعوة من نوع admin، أو بإعادة تفعيل رمز admin معطّل. والـ admin لا يوقف admin آخر. لا يوجد في الـ API أي مسار لتغيير الدور (`staff_role`)، لذلك لا يمكن للمستخدم ترقية نفسه | `club/staff.php`، وخيار admin مخفي في الواجهة لغير الـ owner | HTTP D6a–D6g |
+
+## AI Tests — `INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER`
+
+المفتاح المركزي في `lib/feature_flags.dart`:
+`kAiTestsEnabled = bool.fromEnvironment('AI_TESTS_ENABLED', defaultValue: false)`.
+لإعادة التفعيل لاحقاً: `--dart-define=AI_TESTS_ENABLED=true`، بدون أي تعديل في الكود.
+
+| الاختبار | الحالة |
+|---|---|
+| Squat Assessment | INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER |
+| Countermovement Jump | INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER |
+| Squat Jump | INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER |
+| Drop Jump | INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER |
+| Single Leg Drop Jump | INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER |
+| Single Leg Balance | INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER |
+| Jump Landing | INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER |
+| اختبارات الجلسة الجماعية (Batch) بالكاميرا | INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER |
+
+**كيف أُخفيت (بدون حذف):**
+- **نقاط الدخول في الواجهة:** زر «تقييم بالكاميرا» في ملف اللاعب، وزر «اختبار AI» في لوحة المعد البدني (الإجراءات السريعة وقائمة التسجيل)، وزر الاختبار الجماعي وزر «ابدأ» لكل لاعب في شاشة الجلسة، وتبويب «تمارين AI» في نموذج الجلسة (التمارين اليدوية فقط تظهر)، وزر «بدء التقييمات» في تقرير الفريق، وتلميح «تقييم AI» في شاشة تنفيذ الجلسة للاعب.
+- **حماية داخلية في الشاشات نفسها:** شاشة الكاميرا، وإعداد الوضعية (ويب)، واختيار الاختبار، ومركز التقييم، وطابور الجلسة تُرجع من `createState()` حالة «غير متاح» (`AiTestsDisabledState`). بذلك لا يبدأ `initState` إطلاقاً: لا كاميرا، ولا طلب إذن، ولا تحميل نموذج. وهذا يغطي Deep Links والمسارات القديمة المخزنة وأي `push` مباشر، بدون Crash.
+- **المسارات:** `/physical-assessment` و `select` و `new-player` و `camera` تؤدي إلى صفحة «غير متاح» مع زر رجوع. الكود نفسه باقٍ.
+- **ما بقي ظاهراً عمداً:** سجل التقييمات السابقة ونتائجها (`/physical-assessment/history` و `result` وتقييمات اللاعب)، وقائمة تمارين AI المحفوظة سابقاً على جلسة (عرض فقط)، والتقييم اليدوي، و FMS، وتكوين الجسم (غير معتمدة على AI).
+- **Backend:** لم يُحذف ولم يُفتح أي Endpoint. الصلاحيات كما هي. لم تُكتب أي Migration، ولم تُعدَّل أو تُحذف أي نتيجة AI محفوظة.
+- **كود ميت (غير قابل للوصول أصلاً):** `live_exercise_page.dart` (لا يستورده أي ملف) و `ClubPlayerDetailPage` (لا يُنشأ في أي مكان). تُركا كما هما.
+
+## Database Migrations
+
+| البند | النتيجة |
+|---|---|
+| تطبيق كل الـ migrations المعلّقة على نسخة من قاعدة الاختبار (MySQL 9.1) عبر `api/cli/migrations.php` | ✅ نجحت كلها: 0003, 0004, 0010–0020 |
+| `0005` و `0006` | تُتخطى تلقائياً (`MANUAL APPROVAL REQUIRED`) حسب التصميم. تحتاج تقرير بيانات وموافقة قبل التشغيل |
+| `0008` و `0009` | صيغة `ADD COLUMN IF NOT EXISTS` **تعمل على MariaDB فقط**. على MySQL تُطبَّق بصيغة `ADD COLUMN` (تم التحقق منها). **لم يُعدَّل الملفان** لأن تغييرهما يغيّر الـ checksum على أي قاعدة طُبّقا عليها |
+| الإنتاج | **SERVER VERIFICATION REQUIRED:** `SELECT VERSION()` و `php api/cli/migrations.php status` |
+
+## Production Blockers (المتبقية)
+
+1. **Staging غير موجود بعد.** لم يُنشر الفرع على أي سيرفر.
+2. **UAT متعدد المستخدمين لم يُنفَّذ.**
+3. **حذف الحساب (Apple)** غير مُتحقق على السيرفر، لأن `auth.php` المنشور لا يحتوي `delete_account` حتى يُرفع.
+4. **حالة Migrations الإنتاج** و `device_tokens` و FCM غير مُتحقق منها.
+
+عدم تفعيل اختبارات الـ AI **ليس** Blocker، لأنها مخفية بالكامل ولا يمكن تشغيلها (مُختبر آلياً).
+
+## Staging Plan (للتنفيذ على السيرفر)
+
+1. مسار منفصل (مثال `staging.nextkick.me/api` أو `nextkick.me/staging/api`)، وقاعدة بيانات منفصلة **منسوخة من الإنتاج** (dump → restore). لا تُشارَك قاعدة الإنتاج.
+2. `db_credentials.php` خاص بالـ Staging، ونسخة من `config/fcm-service-account.json` خارج الـ web root.
+3. رفع ملفات الـ API المذكورة في قسم Closure (ملفاً ملفاً)، ثم تشغيل `migrations.php status` ثم `up` على Staging فقط.
+4. بناء التطبيق للـ Staging: `--dart-define=API_BASE_URL=https://<staging>/api` (بدون `AI_TESTS_ENABLED`).
+5. تشغيل مجموعة الاختبار الآلية على نسخة Staging:
+   `APP_ENV=test TEST_DB_NAME=<staging_copy_test> php api/tests/p1_readiness_http_test.php`
+   (تُنشئ بياناتها الخاصة وتحذفها).
+6. `php api/cli/test_push.php <email>` بحساب له جهاز مسجّل.
+7. UAT: سيناريو الـ 24 خطوة، مع استبدال الخطوة 9 (تقييم SLB) باختبار يدوي أو FMS لأن AI مخفي، وإضافة خطوة: «محاولة فتح اختبار AI من رابط قديم → صفحة غير متاح».
+
+## Device Verification Required
+
+كل بنود قسم Closure، مضافاً إليها: عدم ظهور أي زر اختبار AI في كل الشاشات، وصفحة «غير متاح» عند فتح رابط قديم، وعدم طلب إذن الكاميرا إطلاقاً.
+
+## Test Results (هذه المرحلة، أرقام فعلية)
+
+| الاختبار | النتيجة |
+|---|---|
+| `p1_readiness_http_test` (HTTP حقيقي) | **84/84** (كانت 70، أُضيفت 14 حالة: الاعتماد، الطبي لـ admin/owner/PM، ملف الإصابات، منع تصعيد الصلاحيات) |
+| `flutter test` | **32/32** (1 skipped)، منها 3 جديدة لمفتاح الـ AI |
+| `flutter analyze` | 0 مشاكل جديدة (التحذير القديم `_latestHooper` فقط) |
+| `p0_rbac_capability_matrix_test` | OK |
+| `p1_notification_isolation_test` | OK |
+| `php -l` لكل الملفات المعدلة | لا أخطاء |
+
+## Final Recommendation
+
+**`READY FOR STAGING UAT`**. الخطوة التالية تنفيذ خطة الـ Staging أعلاه على السيرفر، ثم UAT، ثم Production Deployment Review.
