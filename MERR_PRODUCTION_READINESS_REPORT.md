@@ -1031,3 +1031,19 @@ php api/cli/test_push.php <test-account-email>        # Outcome: sent
 **ما زال غير مُتحقق (يحتاج حسابات اختبار أو جهازاً أو وصولاً للسيرفر):** حالة الـ Migrations وتشغيل `0021` (`migrations.php status`)، ونوع قاعدة البيانات، و FCM، والسيناريوهات بتسجيل دخول (ملكية الجلسة، ظهور التقييمات، الحجب الطبي، إنشاء حساب موظف و Reset، حذف حساب اختبار)، وكل بنود Device Verification.
 
 **الحالة:** `NOT READY FOR PRODUCTION — BLOCKERS REMAIN`. الكود صار منشوراً وسليماً على مستوى HTTP، والمتبقي هو التحقق بعد تسجيل الدخول، والـ Migration، وFCM، والجهاز.
+
+## Server Discovery — actual results (run by the owner on cp07-ams, 2026-09-19)
+
+| البند | النتيجة الفعلية |
+|---|---|
+| DB engine/version | **MariaDB 10.11.19** (`10.11.19-MariaDB-cll-lve`) |
+| Application path | `public_html/api` |
+| 0001–0004, 0007–0020 | APPLIED |
+| 0005 / 0006 | PENDING (Manual Approval، **مستبعدتان** من هذا الإصدار) |
+| 0008 / 0009 | APPLIED. الإنتاج MariaDB، فلا حاجة لأي تعديل (قرار نهائي: **لا تُعدَّلان**) |
+| 0012 `device_tokens` | APPLIED، والجدول موجود |
+| 0021 | **لم يظهر في `status`**، أي أن الملف لم يُرفع إلى `api/migrations/p0/` |
+| أعمدة `assessments.status / approved_by_user_id / approved_at` | **موجودة أصلاً** (من الـ bootstrap القديم). تشغيل 0021 لن يغيّر الـ schema، وسيسجّلها فقط |
+| توزيع حالات التقييمات | `pending_review = 4`، ولا يوجد أي تقييم معتمد |
+
+**أثر قاعدة «المعتمد فقط»:** التقييمات الأربعة غير معتمدة، فلا يراها أي لاعب حالياً (باستثناء ما سجّله لنفسه). هذا قرار منتج مفتوح: اعتمادها من المدرب، أو تركها مخفية (وهي نتائج اختبارات AI معطّلة حالياً).
