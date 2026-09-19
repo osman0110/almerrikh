@@ -77,6 +77,21 @@ foreach ($cases as [$code, $body, $curlErr, $expected]) {
     $check($actual === $expected, "fcmClassifyResponse($code) expected $expected, got $actual");
 }
 
+// 3. notifyClubRole must also write an in-app notification row: a staff
+// member without a registered device used to lose the alert entirely.
+$sqlite->exec('CREATE TABLE club_staff (club_id INT, user_id INT, staff_role TEXT, status TEXT)');
+$sqlite->exec("INSERT INTO club_staff VALUES (7, 42, 'coach', 'active'), (7, 43, 'coach', 'active'), (7, 44, 'doctor', 'active')");
+$before = (int)$sqlite->query('SELECT COUNT(*) FROM notifications')->fetchColumn();
+try {
+    $result = notifyClubRole($sqlite, 7, 'coach', 'post_session_alert', ['rpe' => 9, 'pain_reported' => 1], ['linked_route' => '/session/1']);
+    $rows = $sqlite->query("SELECT user_id FROM notifications WHERE type = 'post_session_alert'")->fetchAll(PDO::FETCH_COLUMN);
+    $check($result === true, 'notifyClubRole should report success');
+    $check(count($rows) === 2, 'expected one in-app row per coach, got ' . count($rows));
+    $check(!in_array(44, array_map('intval', $rows), true), 'the doctor must not receive a coach-role alert');
+} catch (Throwable $e) {
+    $failures[] = 'notifyClubRole threw: ' . $e->getMessage();
+}
+
 if ($failures) {
     fwrite(STDERR, "p1_notification_isolation_test: FAIL\n" . implode("\n", $failures) . "\n");
     exit(1);

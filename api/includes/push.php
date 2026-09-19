@@ -204,6 +204,14 @@ function notifyClubRole(PDO $pdo, int $clubId, string $staffRole, string $type, 
     foreach ($userIds as $userId) {
         $userId = (int)$userId;
         try {
+            // Staff alerts must land in the in-app notification list as well,
+            // not only as a push: a staff member without a registered device
+            // used to lose the alert entirely (reproduced on production with
+            // post_session_alert and session_scheduled_coach).
+            if (function_exists('createNotification')) {
+                createNotification($pdo, $clubId, $userId, $type, $params, $data['linked_route'] ?? null);
+                continue;
+            }
             $lang = notificationLang($pdo, $userId);
             $text = notificationText($type, $params, $lang);
             sendPushToUser($pdo, $userId, $text['title'], $text['body'], $data);

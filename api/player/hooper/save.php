@@ -113,7 +113,20 @@ elseif (!empty($body['training_session_id'])) $sessionId = (string)$body['traini
 // Scoping — never trust client-supplied IDs for the self-report path;
 // for the coach path, the roster ownership check above already verified it.
 $linkedPlayerId = $isCoach ? $coachTargetPlayerId : ($user['linked_player_id'] ?? null);
+// For a player, club_user_id is the OWNER's user id, not a club id: storing
+// it in club_id broke club-scoped report filters and the staff alert lookup.
+// Resolve the real club from the roster row, keeping the legacy value only as
+// a last-resort fallback for unlinked/independent players.
 $clubId         = $isCoach ? $ctx['club_id']      : ($user['club_user_id']     ?? null);
+if (!$isCoach) {
+    $linkedForClub = $user['linked_player_id'] ?? null;
+    if ($linkedForClub) {
+        $clubLookup = $pdo->prepare('SELECT club_id FROM club_players WHERE id = ?');
+        $clubLookup->execute([$linkedForClub]);
+        $resolvedClubId = $clubLookup->fetchColumn();
+        if ($resolvedClubId) $clubId = (int)$resolvedClubId;
+    }
+}
 
 // A self-reported Hooper check is tied to the previous calendar day or the
 // pre-start part of the event day. Keep this rule server-side as well as in
@@ -256,9 +269,16 @@ $status = $hooper <= 10 ? 'normal' : ($hooper <= 16 ? 'moderate' : 'high_risk');
 if ($status === 'high_risk' && !$existingId && $linkedPlayerId) {
     try {
         require_once dirname(__DIR__, 2) . '/includes/notifications.php';
-        $clubRowStmt = $pdo->prepare('SELECT id FROM clubs WHERE owner_user_id = ?');
-        $clubRowStmt->execute([$clubId]);
-        $formalClubId = $clubRowStmt->fetchColumn();
+        // $clubId is the real club id (resolved above). Older rows may still
+        // hold an owner user id, so fall back to the legacy mapping.
+        $clubCheck = $pdo->prepare('SELECT id FROM clubs WHERE id = ?');
+        $clubCheck->execute([$clubId]);
+        $formalClubId = $clubCheck->fetchColumn();
+        if (!$formalClubId) {
+            $clubRowStmt = $pdo->prepare('SELECT id FROM clubs WHERE owner_user_id = ?');
+            $clubRowStmt->execute([$clubId]);
+            $formalClubId = $clubRowStmt->fetchColumn();
+        }
 
         if ($formalClubId) {
             $nameStmt = $pdo->prepare('SELECT name FROM club_players WHERE id = ?');

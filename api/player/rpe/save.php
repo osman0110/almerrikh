@@ -136,7 +136,20 @@ $load = $rpe * $effectiveDuration;
 // Scoping — never trust client-supplied IDs for the self-report path;
 // for the coach path, the roster ownership check above already verified it.
 $linkedPlayerId = $isCoach ? $coachTargetPlayerId : ($user['linked_player_id'] ?? null);
+// For a player, club_user_id is the OWNER's user id, not a club id: storing
+// it in club_id broke club-scoped report filters and the staff alert lookup.
+// Resolve the real club from the roster row, keeping the legacy value only as
+// a last-resort fallback for unlinked/independent players.
 $clubId         = $isCoach ? $ctx['club_id']      : ($user['club_user_id']     ?? null);
+if (!$isCoach) {
+    $linkedForClub = $user['linked_player_id'] ?? null;
+    if ($linkedForClub) {
+        $clubLookup = $pdo->prepare('SELECT club_id FROM club_players WHERE id = ?');
+        $clubLookup->execute([$linkedForClub]);
+        $resolvedClubId = $clubLookup->fetchColumn();
+        if ($resolvedClubId) $clubId = (int)$resolvedClubId;
+    }
+}
 
 // A player's post-session RPE is only valid after the linked training
 // session or match has ended. The UI mirrors this rule, but the API must also
