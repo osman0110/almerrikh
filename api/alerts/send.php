@@ -68,7 +68,13 @@ $sql = 'SELECT linked_user_id FROM club_players WHERE club_id = ? AND is_active 
 $params = [$clubId];
 
 if ($target === 'individual') {
-    $playerIds = array_filter(array_map('intval', (array)($body['player_ids'] ?? [])));
+    // club_players.id is a VARCHAR uuid ("2c04fbd7-…", "cp-30-…"), never an
+    // int: intval() turned every id into 0 or a wrong number, so individual
+    // alerts failed with "player_ids is required" or silently reached nobody.
+    $playerIds = array_values(array_filter(array_map(
+        static fn($id) => trim((string)$id),
+        (array)($body['player_ids'] ?? [])
+    ), static fn($id) => $id !== ''));
     if (!$playerIds) jsonOut(['success' => false, 'message' => 'player_ids is required'], 400);
     $placeholders = implode(',', array_fill(0, count($playerIds), '?'));
     $sql .= " AND id IN ($placeholders)";
