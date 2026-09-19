@@ -327,13 +327,16 @@ try {
 
     [$c, $r] = api('GET', 'players.php?id=' . urlencode($p1), $tokens['coachA']);
     $pl = $r['players'][0] ?? [];
-    check('C1 coach does NOT receive medical/injury note text', $c === 200 && $pl['medical_notes'] === null && $pl['injury_notes'] === null
-        && ($pl['medical_detail_hidden'] ?? null) === true && ($pl['has_injury_notes'] ?? null) === true, [$c, $pl]);
+    // Decision 2026-09-20: coach/performance manager get the injury SUMMARY
+    // (short injury note + availability), never the clinical medical_notes.
+    check('C1 coach gets the injury note summary but NOT the medical note text', $c === 200 && $pl['medical_notes'] === null
+        && ($pl['injury_notes'] ?? '') === 'Left hamstring'
+        && ($pl['medical_detail_hidden'] ?? null) === true, [$c, $pl]);
     check('C2 coach still gets availability (status, unavailable_reason)', ($pl['status'] ?? '') === 'injured' && ($pl['unavailable_reason'] ?? '') === 'No sprinting this week', $pl);
 
     [$c, $r] = api('GET', 'players.php', $tokens['coachA']);
-    $leak = array_filter($r['players'] ?? [], fn($x) => ($x['medical_notes'] ?? null) !== null || ($x['injury_notes'] ?? null) !== null);
-    check('C3 coach roster listing leaks no medical text', $c === 200 && !$leak, [$c, count($leak)]);
+    $leak = array_filter($r['players'] ?? [], fn($x) => ($x['medical_notes'] ?? null) !== null);
+    check('C3 coach roster listing leaks no medical note text', $c === 200 && !$leak, [$c, count($leak)]);
 
     [$c, $r] = api('GET', 'club/player.php?id=' . urlencode($p1), $tokens['coachA']);
     $pl = $r['player'] ?? $r['data']['player'] ?? $r;
@@ -362,10 +365,12 @@ try {
     // medical text from the API (no wildcard medical access).
     foreach (['adminA' => 'C9 admin', 'ownerA' => 'C10 owner', 'pmA' => 'C11 performance manager'] as $who => $label) {
         [$c, $r] = api('GET', 'players.php?id=' . urlencode($p1), $tokens[$who]);
-        check("$label does NOT receive medical/injury note text", $c === 200 && !str_contains(json_encode($r), 'Cleared for jogging') && !str_contains(json_encode($r), 'Left hamstring'), [$c]);
+        check("$label does NOT receive the clinical medical note text", $c === 200 && !str_contains(json_encode($r), 'Cleared for jogging'), [$c]);
     }
     [$c, $r] = api('GET', 'club/injuries.php?player_id=' . urlencode($p1), $tokens['adminA']);
-    check('C12 admin cannot open the clinical injury file (403)', $c === 403, [$c, $r]);
+    // Summary level is allowed for management; clinical text is not (see G-block).
+    check('C12 admin injury-file read carries no clinical text',
+        $c === 200 && !str_contains(json_encode($r), 'Grade 2 tear') && !str_contains(json_encode($r), 'Palpation'), [$c, $r]);
     [$c, $r] = api('POST', 'players.php', $tokens['adminA'], ['id' => $p1, 'name' => 'Player player1', 'status' => 'injured', 'medical_notes' => 'admin overwrite', 'injury_notes' => null]);
     $row = $pdo->query('SELECT medical_notes, injury_notes FROM club_players WHERE id = ' . $pdo->quote($p1))->fetch();
     check('C13 admin player edit cannot overwrite or wipe medical notes', $c === 200 && $row['medical_notes'] === 'Cleared for jogging' && $row['injury_notes'] === 'Left hamstring', [$c, $r, $row]);
@@ -446,6 +451,72 @@ try {
     [$c2, $r2] = api('GET', 'sessions.php', $tokens['coachB']);
     check('D16 suspending a staff member revokes their sessions', $c === 200 && $c2 === 401, [$c, $c2]);
 
+    // ── G. Injury / treatment SUMMARY for coach & performance manager ───────
+    // Decision 2026-09-20: they see the injury picture (location, type,
+    // severity, RTP stage, physio schedule + recommendation) so they can plan
+    // training, but never diagnosis / exam notes / specialist notes.
+    [$c, $r] = api('POST', 'club/injuries.php', $tokens['doctorA'], [
+        'player_id' => $p1, 'injury_date' => date('Y-m-d'), 'body_location' => 'hamstring',
+        'injury_type' => 'strain', 'severity' => 'moderate', 'rtp_stage' => 'light_activity',
+        'diagnosis' => 'Grade 2 tear on MRI', 'exam_notes' => 'Palpation tender at mid-belly',
+    ]);
+    $caseId = (string)($r['case']['id'] ?? $r['id'] ?? '');
+    check('G1 doctor creates an injury case', $c === 200 && $caseId !== '', [$c, $r]);
+
+    [$c, $r] = api('GET', 'club/injuries.php?player_id=' . urlencode($p1), $tokens['coachA']);
+    $case = $r['cases'][0] ?? [];
+    check('G2 coach can read the injury case list (was 403)', $c === 200 && $case !== [], [$c, $r]);
+    check('G3 coach gets the summary fields', ($case['body_location'] ?? '') === 'hamstring'
+        && ($case['injury_type'] ?? '') === 'strain' && ($case['severity'] ?? '') === 'moderate'
+        && array_key_exists('rtp_stage', $case) && array_key_exists('expected_return_date', $case)
+        && ($case['case_status'] ?? '') !== '', $case);
+    check('G4 coach gets NO diagnosis / exam notes', ($case['diagnosis'] ?? null) === null
+        && ($case['exam_notes'] ?? null) === null && ($case['medical_detail_hidden'] ?? null) === true, $case);
+
+    [$c, $r] = api('GET', 'club/injuries.php?player_id=' . urlencode($p1), $tokens['pmA']);
+    check('G5 performance manager: same summary, no clinical text', $c === 200
+        && !str_contains(json_encode($r), 'Grade 2 tear') && !str_contains(json_encode($r), 'Palpation'), [$c]);
+
+    [$c, $r] = api('GET', 'club/injuries.php?player_id=' . urlencode($p1), $tokens['doctorA']);
+    check('G6 doctor still gets diagnosis and exam notes', $c === 200
+        && str_contains(json_encode($r), 'Grade 2 tear') && str_contains(json_encode($r), 'Palpation'), [$c]);
+
+    [$c, $r] = api('GET', 'club/injuries.php?player_id=' . urlencode($p1), $tokens['analystA']);
+    check('G7 analyst still blocked from the injury file (403)', $c === 403, [$c, $r]);
+
+    [$c, $r] = api('POST', 'club/injuries.php', $tokens['coachA'], [
+        'player_id' => $p1, 'injury_date' => date('Y-m-d'), 'body_location' => 'knee',
+    ]);
+    check('G8 coach cannot create/edit an injury case (403)', $c === 403, [$c, $r]);
+
+    [$c, $r] = api('POST', 'club/physio_sessions.php', $tokens['doctorA'], [
+        'player_id' => $p1, 'scheduled_at' => date('Y-m-d') . ' 10:00:00', 'duration_minutes' => 30,
+        'session_reason' => 'recovery', 'treatment_type' => 'massage', 'body_area' => 'hamstring',
+        'specialist_notes' => 'Deep tissue work, guarded response',
+    ]);
+    check('G9 doctor books a physio session', $c === 200, [$c, $r]);
+
+    [$c, $r] = api('GET', 'club/physio_sessions.php?date=' . date('Y-m-d'), $tokens['coachA']);
+    check('G10 coach sees the physio schedule without specialist notes', $c === 200
+        && !str_contains(json_encode($r), 'Deep tissue work'), [$c, $r]);
+
+    [$c, $r] = api('GET', 'club/doctor_dashboard.php', $tokens['coachA']);
+    check('G11 coach can open the medical overview (summary level)', $c === 200
+        && !str_contains(json_encode($r), 'Grade 2 tear'), [$c]);
+
+    // ── F. Alerts: player ids are uuids, not ints (prod bug 2026-09-20) ─────
+    [$c, $r] = api('POST', 'alerts/send.php', $tokens['adminA'], [
+        'title' => 'P1 alert', 'message' => 'test', 'target' => 'individual', 'player_ids' => [$p1, $p2],
+    ]);
+    check('F1 individual alert accepts uuid player ids and reaches both players',
+        $c === 200 && ($r['sent_count'] ?? 0) === 2, [$c, $r]);
+    $notif = (int)$pdo->query("SELECT COUNT(*) FROM notifications WHERE club_id = $clubA AND type = 'coach_alert'")->fetchColumn();
+    check('F2 one notification row per selected player', $notif === 2, $notif);
+    [$c, $r] = api('POST', 'alerts/send.php', $tokens['adminA'], [
+        'title' => 'P1 alert', 'message' => 'test', 'target' => 'individual', 'player_ids' => [],
+    ]);
+    check('F3 empty selection still rejected (400)', $c === 400, [$c, $r]);
+
     // ── E. Account deletion (Apple 5.1.1(v)) ────────────────────────────────
     [$c, $r] = api('POST', 'assessments.php', $tokens['coachA'], array_merge($asmBody, ['id' => "p1-asm-p3-$seed", 'player_id' => $p3]));
     [$c, $r] = api('POST', 'auth.php?action=delete_account', $tokens['player3'], ['password' => 'wrong']);
@@ -476,6 +547,11 @@ try {
         "DELETE FROM club_sessions WHERE club_id IN ($clubList)",
         "DELETE FROM assessments WHERE club_id IN ($clubList) OR player_id LIKE 'p1-%-$seed'",
         "DELETE FROM notifications WHERE club_id IN ($clubList)",
+        "DELETE FROM injury_updates WHERE injury_case_id IN (SELECT id FROM injury_cases WHERE club_id IN ($clubList))",
+        "DELETE FROM injury_cases WHERE club_id IN ($clubList)",
+        "DELETE FROM physio_session_players WHERE session_id IN (SELECT id FROM physio_sessions WHERE club_id IN ($clubList))",
+        "DELETE FROM physio_sessions WHERE club_id IN ($clubList)",
+        "DELETE FROM player_daily_decisions WHERE club_id IN ($clubList)",
         "DELETE FROM audit_logs WHERE changed_by_user_id IN ($uids)",
         "DELETE FROM player_status_history WHERE player_id LIKE 'p1-%-$seed'",
         "DELETE FROM club_players WHERE club_id IN ($clubList) OR id LIKE 'p1-%-$seed'",
