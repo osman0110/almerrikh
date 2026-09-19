@@ -214,6 +214,7 @@
                 $r['stability_score']      = $r['stability_score'] !== null ? (float)$r['stability_score'] : null;
                 $r['symmetry_score']       = $r['symmetry_score'] !== null ? (float)$r['symmetry_score'] : null;
                 $r['control_score']        = $r['control_score'] !== null ? (float)$r['control_score'] : null;
+                redactMedicalFields($r, $ctx);
             }
             unset($r);
             jsonOut(['players' => $rows]);
@@ -263,6 +264,8 @@
             $r['stability_score']      = $r['stability_score'] !== null ? (float)$r['stability_score'] : null;
             $r['symmetry_score']       = $r['symmetry_score'] !== null ? (float)$r['symmetry_score'] : null;
             $r['control_score']        = $r['control_score'] !== null ? (float)$r['control_score'] : null;
+            // Staff listing only — a player reading their own record keeps it.
+            if (!$callerIsPlayer) redactMedicalFields($r, $ctx);
         }
         unset($r);
         jsonOut(['players' => $rows]);
@@ -403,6 +406,15 @@
         $injuryNotes     = $body['injury_notes']   ?? $body['injuryNotes']   ?? null;
         $physicalNotes   = $body['physical_notes'] ?? $body['physicalNotes'] ?? null;
         $medicalNotes    = $body['medical_notes']  ?? $body['medicalNotes']  ?? null;
+
+        // Roles that cannot READ medical detail (physical coach, performance
+        // manager, ...) never receive these fields (redactMedicalFields), so
+        // their edit form round-trips null — keep the stored medical text
+        // instead of silently wiping what the doctor wrote.
+        if (!canReadMedicalDetail($ctx)) {
+            $injuryNotes  = $existing['injury_notes']  ?? null;
+            $medicalNotes = $existing['medical_notes'] ?? null;
+        }
 
         // club_players.user_id historically means "the owning coach account" —
         // preserved as-is (not the acting staff member) so the many endpoints

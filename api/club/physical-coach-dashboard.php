@@ -175,6 +175,10 @@ $disciplineStmt = $pdo->prepare(
 $disciplineStmt->execute([$clubId, $clubId, $clubId, $clubId]);
 $disciplineSummary = $disciplineStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
+// Medical note text never goes to non-medical roles (physical coach).
+foreach ($players as &$redactRow) { redactMedicalFields($redactRow, $ctx); }
+unset($redactRow);
+
 jsonOut([
     'success' => true,
     'profile' => [

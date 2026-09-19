@@ -72,6 +72,7 @@ $player['stability_score']      = $player['stability_score'] !== null ? (float)$
 $player['symmetry_score']       = $player['symmetry_score'] !== null ? (float)$player['symmetry_score'] : null;
 $player['control_score']        = $player['control_score'] !== null ? (float)$player['control_score'] : null;
 $player['status']               = $player['status'] ?? 'active';
+redactMedicalFields($player, $ctx);
 $player['expected_return_date'] = $player['expected_return_date'] ?? null;
 $player['unavailable_reason']   = $player['unavailable_reason'] ?? null;
 $player['last_assessment_at']   = $player['last_assessment_at'] ?? null;

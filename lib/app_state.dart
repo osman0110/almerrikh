@@ -134,18 +134,16 @@ bool get canManageFms => isCoachRole;
 /// broader (doctor/performance_manager/nutritionist/admin keep '.view').
 bool get canManageBodyComposition => isCoachRole;
 
-/// True when the org role is a medical/physical staff role that may view
-/// and edit injury & medical notes (doctor, physiotherapist, coach,
-/// performance manager). Matches 'medical.read'/'medical.write' in
-/// club_auth.php's clubStaffCan() — narrower than [canManageInjuryCases],
-/// which gates the clinical diagnosis detail. Deliberately excludes
-/// admin/owner: sensitive medical detail is off-limits to management, who
-/// only see the non-clinical participation-status summary.
+/// True when the org role may view and edit the free-text injury & medical
+/// notes (doctor, physiotherapist). Business rule 2026-09-19: the physical
+/// coach (and performance manager) see training restrictions and
+/// availability only, never the notes — the API withholds the text for
+/// roles without 'medical_detail.read' (club_auth.php redactMedicalFields),
+/// this getter just keeps the UI consistent with it. Still excludes
+/// admin/owner in the UI: management only sees the participation summary.
 bool get canViewMedicalNotes =>
     currentOrgRole == OrgRole.doctor ||
-    currentOrgRole == OrgRole.physiotherapist ||
-    currentOrgRole == OrgRole.coach ||
-    currentOrgRole == OrgRole.performanceManager;
+    currentOrgRole == OrgRole.physiotherapist;
 
 /// True when the org role is dedicated medical/treatment staff
 /// (doctor, physiotherapist — covers physio & massage).

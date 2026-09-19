@@ -59,7 +59,8 @@ foreach ($injured as $idx => $p) {
         'priority'    => 1,
         'type'        => 'injury_risk',
         'title'       => 'إصابة — ' . $p['name'],
-        'description' => $p['injury_notes'],
+        // Note text is medical detail — only medical roles get it verbatim.
+        'description' => canReadMedicalDetail($ctx) ? $p['injury_notes'] : '',
         'minutes_ago' => 0,
     ];
 }

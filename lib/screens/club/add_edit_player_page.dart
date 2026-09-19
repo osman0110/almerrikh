@@ -904,18 +904,26 @@ class _AddEditPlayerPageState extends State<AddEditPlayerPage> {
                   ],
                   const SizedBox(height: 20),
                   _sectionLabel(AppLocalizations.get('medical_notes_section')),
-                  _field(_injNotes,
-                      AppLocalizations.get('player_injury_notes_label'),
-                      AppLocalizations.get('injury_notes_hint'), maxLines: 3),
-                  const SizedBox(height: 14),
+                  // Injury/medical note text is medical staff only — the API
+                  // neither sends it to other roles nor lets them overwrite it.
+                  if (canViewMedicalNotes) ...[
+                    _field(_injNotes,
+                        AppLocalizations.get('player_injury_notes_label'),
+                        AppLocalizations.get('injury_notes_hint'), maxLines: 3),
+                    const SizedBox(height: 14),
+                  ],
                   _field(_physNotes,
                       AppLocalizations.get('physical_notes_label'),
                       AppLocalizations.get('physical_notes_hint'), maxLines: 3),
                   const SizedBox(height: 14),
-                  _field(_medNotes,
-                      AppLocalizations.get('medical_restrictions_label'),
-                      AppLocalizations.get('medical_restrictions_hint'),
-                      maxLines: 3),
+                  if (canViewMedicalNotes)
+                    _field(_medNotes,
+                        AppLocalizations.get('medical_restrictions_label'),
+                        AppLocalizations.get('medical_restrictions_hint'),
+                        maxLines: 3)
+                  else
+                    Text(AppLocalizations.get('medical_detail_hidden'),
+                        style: TextStyle(color: AppColors.muted, fontSize: 12)),
                   const SizedBox(height: 20),
                   _sectionLabel(AppLocalizations.get('player_login_section')),
                   if (_alreadyHasLogin)

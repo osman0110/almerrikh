@@ -103,7 +103,9 @@ foreach ($players as $p) {
         'height_cm'      => $p['height_cm'] !== null ? (float)$p['height_cm'] : null,
         'weight_kg'      => $p['weight_kg'] !== null ? (float)$p['weight_kg'] : null,
         'dominant_foot'  => $p['dominant_foot'] ?? null,
-        'injury_notes'   => $p['injury_notes'] ?? null,
+        // Availability flag only; the note text is medical detail.
+        'injury_notes'   => canReadMedicalDetail($ctx) ? ($p['injury_notes'] ?? null) : null,
+        'has_injury_notes' => $hasInjury,
         'photo_url'      => $p['photo_url']    ?? null,
         'status'         => $status,
         'readiness_pct'  => null,
