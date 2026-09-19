@@ -68,11 +68,12 @@ $limit = min((int)($_GET['limit'] ?? 50), 200);
 // the coach's user_id, so the old `user_id = <player>` filter hid them all.
 $stmt = $pdo->prepare(
     'SELECT * FROM assessments
-     WHERE player_id = ?
+     WHERE player_id = ? AND (status = "approved" OR user_id = ?)
      ORDER BY created_at DESC
      LIMIT ' . $limit
 );
-$stmt->execute([$linkedPlayerId]);
+// Only coach-approved results (plus the player's own self-recorded rows).
+$stmt->execute([$linkedPlayerId, $user['id']]);
 $rows = $stmt->fetchAll();
 
 foreach ($rows as &$row) {

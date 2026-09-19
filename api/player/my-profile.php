@@ -76,9 +76,9 @@ $hooper = $hooperStmt->fetch() ?: null;
 
 // Fetch latest assessment score
 $assStmt = $pdo->prepare(
-    'SELECT overall_score, type, created_at FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) ORDER BY created_at DESC LIMIT 1'
+    'SELECT overall_score, type, created_at FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) AND (status = "approved" OR user_id = ?) ORDER BY created_at DESC LIMIT 1'
 );
-$assStmt->execute([$user['id']]);
+$assStmt->execute([$user['id'], $user['id']]);
 $assessment = $assStmt->fetch() ?: null;
 
 $discipline = [

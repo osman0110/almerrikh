@@ -65,10 +65,10 @@ if ($method === 'GET') {
         // staff member's club) — never to whichever coach recorded them.
         if ($isPlayer) {
             $stmt = $pdo->prepare(
-                'SELECT * FROM assessments WHERE player_id = ? AND attempt_group_id = ?
+                'SELECT * FROM assessments WHERE player_id = ? AND attempt_group_id = ? AND (status = "approved" OR user_id = ?)
                  ORDER BY attempt_number ASC'
             );
-            $stmt->execute([(string)($callerInfo['linked_player_id'] ?? ''), $attemptGroupId]);
+            $stmt->execute([(string)($callerInfo['linked_player_id'] ?? ''), $attemptGroupId, $user['id']]);
         } else {
             $ctxGroup = requireClubPermission($pdo, $user, 'assessments.read');
             $stmt = $pdo->prepare(
@@ -114,10 +114,11 @@ if ($method === 'GET') {
         // (user_id = coach), so filtering on the player's own user_id hid
         // every coach-recorded result from "My Assessments".
         $stmt = $pdo->prepare(
-            'SELECT * FROM assessments WHERE player_id = ?
+            'SELECT * FROM assessments WHERE player_id = ? AND (status = "approved" OR user_id = ?)
              ORDER BY created_at DESC LIMIT ' . $limit
         );
-        $stmt->execute([$linkedPlayerId]);
+        // Only coach-approved results (plus the player's own self-recorded rows).
+        $stmt->execute([$linkedPlayerId, $user['id']]);
     } else {
         // Club staff (coach/doctor/analyst/physio/...): scoped to the whole club,
         // not just the account that happens to be logged in.

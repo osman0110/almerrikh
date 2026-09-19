@@ -91,9 +91,9 @@ $rpeRow->execute([$userId]);
 $rpe = $rpeRow->fetch() ?: [];
 
 $assessRow = $pdo->prepare(
-    'SELECT overall_score FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) ORDER BY created_at DESC LIMIT 1'
+    'SELECT overall_score FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) AND (status = "approved" OR user_id = ?) ORDER BY created_at DESC LIMIT 1'
 );
-$assessRow->execute([$userId]);
+$assessRow->execute([$userId, $userId]);
 $assess = $assessRow->fetch() ?: [];
 
 // ── Build payload ─────────────────────────────────────────────────────────────

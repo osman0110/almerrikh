@@ -81,10 +81,10 @@ if ($linkedPlayerId) {
     $stmt = $pdo->prepare(
         'SELECT DATE(created_at) AS date, type AS assessment_type,
                 overall_score, stability_score, symmetry_score, control_score
-         FROM assessments WHERE player_id = ?
+         FROM assessments WHERE player_id = ? AND (status = "approved" OR user_id = ?)
          ORDER BY created_at DESC LIMIT 30'
     );
-    $stmt->execute([$linkedPlayerId]);
+    $stmt->execute([$linkedPlayerId, $userId]);
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $assessmentHistory[] = [
             'date'            => $r['date'],
