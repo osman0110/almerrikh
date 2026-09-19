@@ -58,3 +58,4 @@ jobs:
           php api/tests/training_load_calculator_pure_test.php
           php api/tests/p1_notification_isolation_test.php
           php api/tests/p1_no_stray_output_test.php
+          php api/tests/p1_assessment_visibility_test.php

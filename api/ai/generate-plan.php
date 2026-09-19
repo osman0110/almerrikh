@@ -11,6 +11,7 @@ header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once '../db.php';
+require_once __DIR__ . '/../includes/assessment_visibility.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -111,7 +112,7 @@ $rpe = $stmt->fetch() ?? [];
 
 // Fetch latest assessment score
 $stmt = $pdo->prepare(
-    'SELECT overall_score, type FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) AND (status = "approved" OR user_id = ?) ORDER BY created_at DESC LIMIT 1'
+    'SELECT overall_score, type FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) AND ' . playerAssessmentVisibilitySql($pdo) . ' ORDER BY created_at DESC LIMIT 1'
 );
 $stmt->execute([$user['id'], $user['id']]);
 $assessment = $stmt->fetch() ?? [];

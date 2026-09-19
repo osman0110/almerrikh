@@ -10,6 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 require_once 'db.php';
+require_once __DIR__ . '/includes/assessment_visibility.php';
 require_once 'includes/club_auth.php';
 
 function jsonOut(array $data, int $code = 200): void {
@@ -65,7 +66,7 @@ if ($method === 'GET') {
         // staff member's club) — never to whichever coach recorded them.
         if ($isPlayer) {
             $stmt = $pdo->prepare(
-                'SELECT * FROM assessments WHERE player_id = ? AND attempt_group_id = ? AND (status = "approved" OR user_id = ?)
+                'SELECT * FROM assessments WHERE player_id = ? AND attempt_group_id = ? AND ' . playerAssessmentVisibilitySql($pdo) . '
                  ORDER BY attempt_number ASC'
             );
             $stmt->execute([(string)($callerInfo['linked_player_id'] ?? ''), $attemptGroupId, $user['id']]);
@@ -114,7 +115,7 @@ if ($method === 'GET') {
         // (user_id = coach), so filtering on the player's own user_id hid
         // every coach-recorded result from "My Assessments".
         $stmt = $pdo->prepare(
-            'SELECT * FROM assessments WHERE player_id = ? AND (status = "approved" OR user_id = ?)
+            'SELECT * FROM assessments WHERE player_id = ? AND ' . playerAssessmentVisibilitySql($pdo) . '
              ORDER BY created_at DESC LIMIT ' . $limit
         );
         // Only coach-approved results (plus the player's own self-recorded rows).

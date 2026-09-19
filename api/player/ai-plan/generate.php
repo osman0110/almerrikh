@@ -1,5 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/db.php';
+require_once __DIR__ . '/../../includes/assessment_visibility.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -91,7 +92,7 @@ $rpeRow->execute([$userId]);
 $rpe = $rpeRow->fetch() ?: [];
 
 $assessRow = $pdo->prepare(
-    'SELECT overall_score FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) AND (status = "approved" OR user_id = ?) ORDER BY created_at DESC LIMIT 1'
+    'SELECT overall_score FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) AND ' . playerAssessmentVisibilitySql($pdo) . ' ORDER BY created_at DESC LIMIT 1'
 );
 $assessRow->execute([$userId, $userId]);
 $assess = $assessRow->fetch() ?: [];

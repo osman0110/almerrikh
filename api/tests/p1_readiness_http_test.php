@@ -53,7 +53,9 @@ $env = array_merge(getenv(), [
 ]);
 $serverLog = "$tmpDir/server.log";
 $proc = proc_open(
-    [PHP_BINARY, '-d', 'display_errors=0', '-d', "error_log=$serverLog", '-S', "127.0.0.1:$port", '-t', $apiDir],
+    // output_buffering=0 mirrors production LiteSpeed: stray output before headers
+    // then really breaks status codes here too (see p1_no_stray_output_test).
+    [PHP_BINARY, '-d', 'display_errors=0', '-d', 'output_buffering=0', '-d', "error_log=$serverLog", '-S', "127.0.0.1:$port", '-t', $apiDir],
     [0 => ['pipe', 'r'], 1 => ['file', "$tmpDir/stdout.log", 'a'], 2 => ['file', "$tmpDir/stderr.log", 'a']],
     $pipes, $apiDir, $env
 );

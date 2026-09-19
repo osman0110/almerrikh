@@ -10,6 +10,7 @@ header('Access-Control-Allow-Methods: GET, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once '../db.php';
+require_once __DIR__ . '/../includes/assessment_visibility.php';
 require_once '../includes/fitness/BodyCompositionRepository.php';
 
 function jsonOut(array $data, int $code = 200): void {
@@ -76,7 +77,7 @@ $hooper = $hooperStmt->fetch() ?: null;
 
 // Fetch latest assessment score
 $assStmt = $pdo->prepare(
-    'SELECT overall_score, type, created_at FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) AND (status = "approved" OR user_id = ?) ORDER BY created_at DESC LIMIT 1'
+    'SELECT overall_score, type, created_at FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) AND ' . playerAssessmentVisibilitySql($pdo) . ' ORDER BY created_at DESC LIMIT 1'
 );
 $assStmt->execute([$user['id'], $user['id']]);
 $assessment = $assStmt->fetch() ?: null;

@@ -11,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 }
 
 require_once dirname(__DIR__, 2) . '/db.php';
+require_once __DIR__ . '/../../includes/assessment_visibility.php';
 require_once dirname(__DIR__, 2) . '/report_helpers.php';
 
 $user = rptAuthUser($pdo);
@@ -81,7 +82,7 @@ if ($linkedPlayerId) {
     $stmt = $pdo->prepare(
         'SELECT DATE(created_at) AS date, type AS assessment_type,
                 overall_score, stability_score, symmetry_score, control_score
-         FROM assessments WHERE player_id = ? AND (status = "approved" OR user_id = ?)
+         FROM assessments WHERE player_id = ? AND ' . playerAssessmentVisibilitySql($pdo) . '
          ORDER BY created_at DESC LIMIT 30'
     );
     $stmt->execute([$linkedPlayerId, $userId]);

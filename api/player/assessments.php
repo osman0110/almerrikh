@@ -14,6 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') { http_response_code(405); echo '{"error":"GET only"}'; exit; }
 
 require_once '../db.php';
+require_once __DIR__ . '/../includes/assessment_visibility.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -68,7 +69,7 @@ $limit = min((int)($_GET['limit'] ?? 50), 200);
 // the coach's user_id, so the old `user_id = <player>` filter hid them all.
 $stmt = $pdo->prepare(
     'SELECT * FROM assessments
-     WHERE player_id = ? AND (status = "approved" OR user_id = ?)
+     WHERE player_id = ? AND ' . playerAssessmentVisibilitySql($pdo) . '
      ORDER BY created_at DESC
      LIMIT ' . $limit
 );
