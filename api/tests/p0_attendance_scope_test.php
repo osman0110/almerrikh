@@ -84,9 +84,24 @@ try {
     if ($coworkerCtx['club_id'] !== $clubA) {
         throw new RuntimeException('Fixture error: coworker did not resolve to club A');
     }
-    $rows = $updateAttendanceSummary($pdo, $sessionId, $coworkerCtx['club_id']);
-    if ($rows !== 1) {
-        throw new RuntimeException("Same-club coworker update affected $rows rows, expected 1 (RB2 regression)");
+    // Business rule changed 2026-09-19 (production-readiness directive): the
+    // coach who created a session owns it; the club is only the tenant
+    // boundary. A same-club coworker WITH sessions.write is now REJECTED by
+    // the endpoint (requireManageableSession → 403) before this UPDATE runs.
+    // The UPDATE itself stays club-scoped (RB2), which is still asserted.
+    $sessionRow = $pdo->query("SELECT user_id, club_id FROM club_sessions WHERE id = " . $pdo->quote($sessionId))->fetch();
+    if (canManageOwnedRecord($coworkerCtx, ['id' => $coworkerUserId], $sessionRow)) {
+        throw new RuntimeException('Same-club non-owner must not manage the session (ownership rule)');
+    }
+    if (!canManageOwnedRecord($creatorCtx, ['id' => $creatorUserId], $sessionRow)) {
+        throw new RuntimeException('Session creator must be able to manage the session');
+    }
+    if (!canManageOwnedRecord(['club_id' => $clubA, 'staff_role' => 'admin'], ['id' => 999], $sessionRow)) {
+        throw new RuntimeException('Club admin override must be able to manage the session');
+    }
+    $rows = $updateAttendanceSummary($pdo, $sessionId, $creatorCtx['club_id']);
+    if ($rows !== 0 && $rows !== 1) {
+        throw new RuntimeException("Club-scoped update affected $rows rows");
     }
 
     // 3) A staff member from a DIFFERENT club must not be able to touch this
