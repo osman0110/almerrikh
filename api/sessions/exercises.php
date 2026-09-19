@@ -6,6 +6,7 @@ header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/club_auth.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -45,9 +46,11 @@ if ($method === 'GET') {
     $sessionId = $_GET['session_id'] ?? '';
     if (!$sessionId) jsonOut(['error' => 'session_id required'], 400);
 
-    // Verify session ownership
-    $stmt = $pdo->prepare('SELECT id FROM club_sessions WHERE id = ? AND user_id = ?');
-    $stmt->execute([$sessionId, $user['id']]);
+    // Reading a session's plan is club-wide (same as reading the session);
+    // only the owning coach (or owner/admin) may change it — see POST/DELETE.
+    $ctx = requireClubPermission($pdo, $user, 'sessions.read');
+    $stmt = $pdo->prepare('SELECT id FROM club_sessions WHERE id = ? AND club_id = ?');
+    $stmt->execute([$sessionId, $ctx['club_id']]);
     if (!$stmt->fetch()) jsonOut(['error' => 'Session not found'], 404);
 
     $stmt = $pdo->prepare(
@@ -77,10 +80,10 @@ if ($method === 'POST') {
 
     if (!$sessionId) jsonOut(['error' => 'session_id required'], 400);
 
-    // Verify session ownership
-    $stmt = $pdo->prepare('SELECT id FROM club_sessions WHERE id = ? AND user_id = ?');
-    $stmt->execute([$sessionId, $user['id']]);
-    if (!$stmt->fetch()) jsonOut(['error' => 'Session not found or forbidden'], 403);
+    // Session in another club → 404; in this club but not the owner → 403.
+    $ctx = requireClubPermission($pdo, $user, 'sessions.write');
+    requireManageableSession($pdo, $user, $ctx, $sessionId);
+    if (!is_array($exercises)) jsonOut(['error' => 'exercises must be a list'], 400);
 
     $pdo->beginTransaction();
     try {
@@ -122,7 +125,8 @@ if ($method === 'POST') {
         jsonOut(['success' => true, 'count' => count($exercises)]);
     } catch (Throwable $e) {
         $pdo->rollBack();
-        jsonOut(['error' => $e->getMessage()], 500);
+        error_log('sessions/exercises.php: save failed: ' . $e->getMessage());
+        jsonOut(['error' => 'Unable to save the session exercises'], 500);
     }
 }
 
@@ -131,13 +135,20 @@ if ($method === 'DELETE') {
     $id = $_GET['id'] ?? (json_decode(file_get_contents('php://input'), true)['id'] ?? '');
     if (!$id) jsonOut(['error' => 'id required'], 400);
 
-    $stmt = $pdo->prepare(
-        'DELETE cse FROM club_session_exercises cse
+    $ctx = requireClubPermission($pdo, $user, 'sessions.write');
+    $lookup = $pdo->prepare(
+        'SELECT cse.session_id FROM club_session_exercises cse
          JOIN club_sessions cs ON cs.id = cse.session_id
-         WHERE cse.id = ? AND cs.user_id = ?'
+         WHERE cse.id = ? AND cs.club_id = ?'
     );
-    $stmt->execute([(int)$id, $user['id']]);
-    jsonOut(['success' => true]);
+    $lookup->execute([(int)$id, $ctx['club_id']]);
+    $exerciseSessionId = $lookup->fetchColumn();
+    if ($exerciseSessionId === false) jsonOut(['error' => 'Exercise not found'], 404);
+    requireManageableSession($pdo, $user, $ctx, (string)$exerciseSessionId);
+
+    $stmt = $pdo->prepare('DELETE FROM club_session_exercises WHERE id = ?');
+    $stmt->execute([(int)$id]);
+    jsonOut(['success' => true, 'deleted' => $stmt->rowCount() > 0]);
 }
 
 jsonOut(['error' => 'Method not allowed'], 405);

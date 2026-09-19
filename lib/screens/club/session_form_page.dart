@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:uuid/uuid.dart';
 import '../../app_colors.dart';
 import '../../app_localizations.dart';
 import '../../app_state.dart';
@@ -75,6 +76,10 @@ class _SessionFormPageState extends State<SessionFormPage>
   bool _saving  = false;
 
   bool get _isEdit => widget.sessionId != null;
+  // One id per form, generated once: a retry after a timeout (server
+  // already saved) or a second tap re-sends the SAME id, which the API
+  // treats as an idempotent update instead of creating a duplicate.
+  late final String _draftId = widget.sessionId ?? const Uuid().v4();
 
   List<({String code, String label})> get _positions => [
     (code: 'GK',  label: AppLocalizations.get('pos_gk')),
@@ -149,6 +154,7 @@ class _SessionFormPageState extends State<SessionFormPage>
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (_name.text.trim().isEmpty) {
       _snack(AppLocalizations.get('session_title_required'));
       return;
@@ -162,7 +168,7 @@ class _SessionFormPageState extends State<SessionFormPage>
       final startStr =
           '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}';
       final session = TrainingSession(
-        id:                 widget.sessionId ?? '',
+        id:                 _draftId,
         name:               _name.text.trim(),
         date:               _date,
         teamId:             currentTeamId,

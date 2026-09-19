@@ -67,6 +67,9 @@ if ($method === 'GET') {
         $row = $stmt->fetch();
         if (!$row) jsonOut(['error' => 'Session not found'], 404);
         normalizeSession($row);
+        // Reads are club-wide; writes are owner-only (see canManageOwnedRecord).
+        // The app uses this to hide edit/clock/attendance controls.
+        $row['can_manage'] = canManageOwnedRecord($ctx, $user, $row);
 
         // ── Roster + real attendance + wellness snapshot ──────────────────────
         if (($_GET['roster'] ?? '') === '1') {
@@ -160,7 +163,10 @@ if ($method === 'GET') {
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
 
-    foreach ($rows as &$r) { normalizeSession($r); }
+    foreach ($rows as &$r) {
+        normalizeSession($r);
+        $r['can_manage'] = canManageOwnedRecord($ctx, $user, $r);
+    }
     unset($r);
 
     jsonOut(['sessions' => $rows, 'count' => count($rows)]);
@@ -198,10 +204,7 @@ if ($method === 'POST') {
         $playerId = trim($body['player_id'] ?? '');
         if (!$sessionId) jsonOut(['error' => 'session_id required'], 400);
 
-        $sessionStmt = $pdo->prepare('SELECT * FROM club_sessions WHERE id = ? AND club_id = ?');
-        $sessionStmt->execute([$sessionId, $ctx['club_id']]);
-        $session = $sessionStmt->fetch(PDO::FETCH_ASSOC);
-        if (!$session) jsonOut(['error' => 'Session not found'], 404);
+        $session = requireManageableSession($pdo, $user, $ctx, $sessionId);
 
         $playerIds = $session['player_ids'] && $session['player_ids'] !== 'null'
             ? json_decode($session['player_ids'], true) ?? [] : [];
@@ -313,11 +316,18 @@ if ($method === 'POST') {
         if (!$sessionId) jsonOut(['error' => 'session_id required'], 400);
 
         $ctx = requireClubPermission($pdo, $user, 'sessions.write');
-        $ownerStmt = $pdo->prepare('SELECT id, linked_training_session_id FROM club_sessions WHERE id = ? AND club_id = ?');
-        $ownerStmt->execute([$sessionId, $ctx['club_id']]);
-        $ownerRow = $ownerStmt->fetch(PDO::FETCH_ASSOC);
-        if (!$ownerRow) jsonOut(['error' => 'Session not found'], 404);
+        $ownerRow = requireManageableSession($pdo, $user, $ctx, $sessionId);
         $linkedTrainingSessionId = $ownerRow['linked_training_session_id'] ?? null;
+        // Attendance may only be recorded for players actually assigned to
+        // this session (ids come from the client, so check them server-side).
+        $assignedIds = $ownerRow['player_ids'] && $ownerRow['player_ids'] !== 'null'
+            ? array_map('strval', json_decode($ownerRow['player_ids'], true) ?? []) : [];
+        if (!is_array($attendance)) jsonOut(['error' => 'attendance must be an object'], 400);
+        foreach (array_keys($attendance) as $pid) {
+            if (!in_array((string)$pid, $assignedIds, true)) {
+                jsonOut(['error' => 'Player is not assigned to this session', 'player_id' => (string)$pid], 422);
+            }
+        }
 
         $validStatuses = ['present', 'absent', 'late'];
         $attStmt = $pdo->prepare(
@@ -375,9 +385,8 @@ if ($method === 'POST') {
         $sessionId = trim($body['session_id'] ?? '');
         if (!$sessionId) jsonOut(['error' => 'session_id required'], 400);
 
-        $ownerStmt = $pdo->prepare('SELECT id FROM club_sessions WHERE id = ? AND user_id = ?');
-        $ownerStmt->execute([$sessionId, $user['id']]);
-        if (!$ownerStmt->fetch()) jsonOut(['error' => 'Session not found'], 404);
+        $ctx = requireClubPermission($pdo, $user, 'sessions.write');
+        requireManageableSession($pdo, $user, $ctx, $sessionId);
 
         $name = trim($body['exercise_name'] ?? $body['name'] ?? '');
         if (!$name) jsonOut(['error' => 'exercise_name required'], 400);
@@ -421,22 +430,26 @@ if ($method === 'POST') {
     if (!$title) jsonOut(['error' => 'title is required'], 400);
     if (!$date)  jsonOut(['error' => 'date is required'], 400);
 
-    // Sessions belong to the whole club (shared across every coach/staff
-    // member), not to whichever coach created them — resolve the real club
-    // and gate/scope on that instead of a strict creator-id match.
-    $sessionCtx = resolveClubContext($pdo, $user);
+    // Business rule (2026-09-19): the coach who creates a session owns it;
+    // the club is only the tenant boundary. Creating needs 'sessions.write'
+    // (enforced here, not just by hiding the button in the app); editing an
+    // existing session additionally needs ownership (or owner/admin).
+    $sessionCtx = requireClubPermission($pdo, $user, 'sessions.write');
     $sessionClubId = $sessionCtx['club_id'];
 
-    // Ownership check for updates
-    $existing = false;
-    if ($id) {
-        $existStmt = $pdo->prepare('SELECT user_id, club_id FROM club_sessions WHERE id = ?');
-        $existStmt->execute([$id]);
-        $existing = $existStmt->fetch();
-        if ($existing) {
-            $sameClub = $sessionClubId !== null && (int)($existing['club_id'] ?? 0) === (int)$sessionClubId;
-            $sameCreator = (int)$existing['user_id'] === (int)$user['id'];
-            if (!$sameClub && !$sameCreator) jsonOut(['error' => 'Forbidden'], 403);
+    $existStmt = $pdo->prepare('SELECT * FROM club_sessions WHERE id = ?');
+    $existStmt->execute([$id]);
+    $existing = $existStmt->fetch(PDO::FETCH_ASSOC) ?: false;
+    if ($existing) {
+        if ((int)($existing['club_id'] ?? 0) !== (int)$sessionClubId) {
+            // Client-generated id collides with another club's session.
+            jsonOut(['error' => 'Forbidden'], 403);
+        }
+        if (!canManageOwnedRecord($sessionCtx, $user, $existing)) {
+            jsonOut([
+                'error' => 'Forbidden — only the coach who owns this session can change it',
+                'code'  => 'not_session_owner',
+            ], 403);
         }
     }
     $isNewSession = !$existing;
@@ -484,6 +497,21 @@ if ($method === 'POST') {
     $playerIdsJson = is_array($playerIds) ? json_encode($playerIds) : $playerIds;
     $completedIdsJson = is_array($completedIds) ? json_encode($completedIds) : $completedIds;
     $assessmentTypesJson = is_array($assessmentTypes) ? json_encode($assessmentTypes) : $assessmentTypes;
+
+    // player_ids come from the client — every one must be a player of this
+    // club (tenant boundary), otherwise another club's roster could be
+    // attached to the session and its players notified.
+    if (is_array($playerIds) && $playerIds) {
+        $playerIds = array_values(array_unique(array_map('strval', $playerIds)));
+        $checkPh = implode(',', array_fill(0, count($playerIds), '?'));
+        $checkStmt = $pdo->prepare("SELECT id FROM club_players WHERE club_id = ? AND id IN ($checkPh)");
+        $checkStmt->execute([$sessionClubId, ...$playerIds]);
+        $foreign = array_values(array_diff($playerIds, array_map('strval', $checkStmt->fetchAll(PDO::FETCH_COLUMN))));
+        if ($foreign) {
+            jsonOut(['error' => 'Some players do not belong to your club', 'player_ids' => $foreign], 422);
+        }
+        $playerIdsJson = json_encode($playerIds);
+    }
 
     try {
         $pdo->beginTransaction();
@@ -542,9 +570,9 @@ if ($method === 'POST') {
         if ($playerIds) {
             $placeholders = implode(',', array_fill(0, count($playerIds), '?'));
             $linkedStmt = $pdo->prepare(
-                "SELECT id, linked_user_id FROM club_players WHERE id IN ($placeholders) AND linked_user_id IS NOT NULL"
+                "SELECT id, linked_user_id FROM club_players WHERE club_id = ? AND id IN ($placeholders) AND linked_user_id IS NOT NULL"
             );
-            $linkedStmt->execute($playerIds);
+            $linkedStmt->execute([$clubId, ...$playerIds]);
             $linkedRows = $linkedStmt->fetchAll(PDO::FETCH_ASSOC);
 
             $spStmt = $pdo->prepare(
@@ -588,23 +616,35 @@ if ($method === 'POST') {
     // re-notifying on every minor edit. Runs AFTER the commit above and in
     // its own try/catch: the session is already saved at this point, so a
     // notification failure must never be reported back as a save failure.
+    require_once 'includes/audit_log.php';
+    logAuditSafe($pdo, 'club_sessions', $id, $isNewSession ? 'created' : 'updated', null, $title . ' @ ' . $date, (int)$user['id']);
+
+    $notificationsSent = null;
     if ($isNewSession && $clubId) {
+        $notificationsSent = true;
         try {
             $startTime = $body['startTime'] ?? $body['start_time'] ?? '';
             $when = "$date $startTime";
             foreach ($linkedRows ?? [] as $cp) {
-                createNotification(
+                if (!createNotification(
                     $pdo, (int)$clubId, (int)$cp['linked_user_id'], 'session_scheduled',
                     ['title' => $title, 'when' => $when], '/session/' . $id
-                );
+                )) {
+                    $notificationsSent = false;
+                }
             }
-            notifyClubRole($pdo, (int)$clubId, 'coach', 'session_scheduled_coach', ['title' => $title, 'when' => $when], ['linked_route' => '/session/' . $id]);
+            if (!notifyClubRole($pdo, (int)$clubId, 'coach', 'session_scheduled_coach', ['title' => $title, 'when' => $when], ['linked_route' => '/session/' . $id])) {
+                $notificationsSent = false;
+            }
         } catch (Throwable $e) {
+            $notificationsSent = false;
             error_log('sessions.php: session_scheduled notification failed: ' . $e->getMessage());
         }
     }
 
-    jsonOut(['success' => true, 'id' => $id]);
+    // The session is saved regardless of notification delivery; the flag is
+    // informational only (null = no notification was due, e.g. an edit).
+    jsonOut(['success' => true, 'id' => $id, 'created' => $isNewSession, 'notifications_sent' => $notificationsSent]);
 }
 
 // ── DELETE: delete session ────────────────────────────────────────────────────
@@ -613,9 +653,25 @@ if ($method === 'DELETE') {
     $id = $_GET['id'] ?? (json_decode(file_get_contents('php://input'), true)['id'] ?? '');
     if (!$id) jsonOut(['error' => 'id is required'], 400);
 
-    $stmt = $pdo->prepare('DELETE FROM club_sessions WHERE id = ? AND user_id = ?');
-    $stmt->execute([$id, $user['id']]);
-    jsonOut(['success' => true]);
+    $ctx = requireClubPermission($pdo, $user, 'sessions.write');
+    requireManageableSession($pdo, $user, $ctx, (string)$id);
+
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare('DELETE FROM club_sessions WHERE id = ? AND club_id = ?');
+        $stmt->execute([$id, $ctx['club_id']]);
+        // Players must stop seeing a deleted session as "today's session";
+        // rows a player already progressed on are kept for their history.
+        $pdo->prepare("DELETE FROM session_players WHERE session_id = ? AND status = 'assigned'")->execute([$id]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('sessions.php: delete failed: ' . $e->getMessage());
+        jsonOut(['error' => 'Unable to delete the session'], 500);
+    }
+    require_once 'includes/audit_log.php';
+    logAuditSafe($pdo, 'club_sessions', (string)$id, 'deleted', null, 'deleted', (int)$user['id']);
+    jsonOut(['success' => true, 'deleted' => $stmt->rowCount() > 0]);
 }
 
 jsonOut(['error' => 'Method not allowed'], 405);

@@ -127,7 +127,18 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
     if (mounted) setState(() => _loading = false);
   }
 
+  /// Sessions belong to the coach who created them (business rule
+  /// 2026-09-19). The API enforces it; this only avoids a round-trip that
+  /// would end in 403 for another coach's session.
+  bool _guardManage() {
+    if (_session?.canManage != false) return true;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(AppLocalizations.get('session_view_only'))));
+    return false;
+  }
+
   Future<void> _setAttendance(String playerId, String status) async {
+    if (!_guardManage()) return;
     final previous = _attendance[playerId];
     setState(() => _attendance = {..._attendance, playerId: status});
     final ok = await ClubService().setSessionAttendance(widget.sessionId, {playerId: status});
@@ -140,7 +151,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
   }
 
   Future<void> _runSessionClock(String operation, {String? playerId}) async {
-    if (_clockBusy) return;
+    if (_clockBusy || !_guardManage()) return;
     setState(() => _clockBusy = true);
     final error = await ClubService().controlSessionClock(
         widget.sessionId, operation, playerId: playerId);
@@ -183,6 +194,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
   }
 
   Future<void> _startBatchAssessment() async {
+    if (!_guardManage()) return;
     final s = _session!;
     final allowedTypes = _getAllowedAssessmentTypes(s);
 
@@ -289,6 +301,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
   }
 
   Future<void> _startTest(ClubPlayer p) async {
+    if (!_guardManage()) return;
     final session = _session!;
     final allowedTypes = _getAllowedAssessmentTypes(session);
 
@@ -359,6 +372,20 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
         child: Column(
           children: [
             _buildHeader(),
+            if (!_loading && _session != null && !_session!.canManage)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Row(children: [
+                  const Icon(Icons.visibility_rounded,
+                      color: AppColors.muted, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(AppLocalizations.get('session_view_only'),
+                        style: const TextStyle(
+                            color: AppColors.muted, fontSize: 12)),
+                  ),
+                ]),
+              ),
             if (_loading)
               const Expanded(
                 child: Center(
@@ -463,7 +490,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
               maxLines: 1, overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (_session != null && canManageSessions)
+          if (_session != null && canManageSessions && _session!.canManage)
             GestureDetector(
               onTap: () async {
                 await Navigator.of(context).push(MaterialPageRoute(
@@ -681,7 +708,7 @@ class _SessionDetailPageState extends State<SessionDetailPage> {
           width: double.infinity,
           height: 50,
           child: ElevatedButton.icon(
-            onPressed: _clockBusy || (!running && hasStarted)
+            onPressed: _clockBusy || !session.canManage || (!running && hasStarted)
                 ? null
                 : () => _runSessionClock(
                     running ? 'finish_session' : 'start_session'),

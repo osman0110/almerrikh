@@ -636,6 +636,8 @@ class ClubPlayer {
     this.unavailableReason,
     this.lastAssessmentAt,
     this.hasLogin = false,
+    this.linkedUserId,
+    this.medicalDetailHidden = false,
     this.isArchived = false,
     required this.createdAt,
   });
@@ -669,6 +671,11 @@ class ClubPlayer {
   String? unavailableReason;
   DateTime? lastAssessmentAt;
   bool hasLogin;
+  /// users.id of the player's own login (admin password reset).
+  int? linkedUserId;
+  /// True when the API withheld medical/injury note text for this role
+  /// (only medical staff and owner/admin receive it).
+  bool medicalDetailHidden;
   bool isArchived;
   DateTime createdAt;
 
@@ -793,6 +800,8 @@ class ClubPlayer {
     hasLogin:
         j['linked_user_id'] != null &&
         j['linked_user_id'].toString().isNotEmpty,
+    linkedUserId: int.tryParse(j['linked_user_id']?.toString() ?? ''),
+    medicalDetailHidden: j['medical_detail_hidden'] == true,
     isArchived: j['is_active'] == false ||
         j['is_active'] == 0 ||
         j['is_active']?.toString() == '0',
@@ -867,6 +876,7 @@ class TrainingSession {
     this.rpeEditable = false,
     this.clockRunning = false,
     this.elapsedSeconds = 0,
+    this.canManage = true,
   });
 
   final String id;
@@ -902,6 +912,10 @@ class TrainingSession {
   bool rpeEditable; // player may correct it during the 50-minute window
   bool clockRunning;
   int elapsedSeconds;
+  /// Server-computed: caller owns the session (or is owner/admin). Defaults
+  /// to true when an older API omits it, so nothing is hidden by mistake —
+  /// the API enforces ownership either way.
+  bool canManage;
 
   bool get isCompleted =>
       completedPlayerIds.length >= playerIds.length && playerIds.isNotEmpty;
@@ -1038,6 +1052,7 @@ class TrainingSession {
       clockRunning:
           j['clock_running'] == true || j['clock_running'] == 1,
       elapsedSeconds: _jsonInt(j['elapsed_seconds']),
+      canManage: j['can_manage'] != false,
     );
   }
 
