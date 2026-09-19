@@ -25,9 +25,11 @@ function checkMatrix(array $expected, string $action, array &$failures): void {
 // Clinical injury/diagnosis detail — must stay restricted to medical staff.
 // A coach or analyst reaching this would leak diagnosis-level text (see
 // api/club/injuries.php, which gates on exactly this capability).
+// Business rule 2026-09-19: owner/admin do NOT get medical detail through
+// their '*' wildcard (EXPLICIT_ONLY_ACTIONS in club_auth.php).
 checkMatrix([
-    'owner'               => true,
-    'admin'               => true,
+    'owner'               => false,
+    'admin'               => false,
     'doctor'              => true,
     'physiotherapist'     => true,
     'massage_specialist'  => true,
@@ -40,6 +42,8 @@ checkMatrix([
 ], 'medical_detail.read', $failures);
 
 checkMatrix([
+    'owner'               => false,
+    'admin'               => false,
     'doctor'              => true,
     'physiotherapist'     => true,
     'massage_specialist'  => true,

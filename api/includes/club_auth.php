@@ -57,6 +57,16 @@ const COACH_ONLY_ACTIONS = [
 
 // Capability map. Keep this the single source of truth for what each staff
 // role can do — do not duplicate role checks inline in endpoints.
+// Full clinical/medical detail (diagnosis, exam notes, free-text medical and
+// injury notes, attachments, rehab file) is NOT covered by the owner/admin
+// '*' wildcard (decision 2026-09-19): being club management does not grant
+// medical access. Only roles that list these actions explicitly (doctor,
+// physiotherapist, massage_specialist) get them.
+const EXPLICIT_ONLY_ACTIONS = [
+    'medical_detail.read',
+    'medical_detail.write',
+];
+
 function clubStaffCan(string $staffRole, string $action): bool {
     if (in_array($action, COACH_ONLY_ACTIONS, true)) {
         return $staffRole === 'coach';
@@ -201,6 +211,9 @@ function clubStaffCan(string $staffRole, string $action): bool {
     ];
 
     $allowed = $capabilities[$staffRole] ?? [];
+    if (in_array($action, EXPLICIT_ONLY_ACTIONS, true)) {
+        return in_array($action, $allowed, true);
+    }
     return in_array('*', $allowed, true) || in_array($action, $allowed, true);
 }
 
@@ -263,7 +276,7 @@ function requireManageableSession(PDO $pdo, array $user, array $ctx, string $ses
 // ── Medical information: two levels ──────────────────────────────────────────
 // Full medical text (club_players.medical_notes / injury_notes, injury-case
 // diagnosis & exam notes) is only for roles with 'medical_detail.read'
-// (doctor, physiotherapist, owner/admin). Everyone else — including the
+// (doctor, physiotherapist — NOT owner/admin, see EXPLICIT_ONLY_ACTIONS). Everyone else — including the
 // physical coach — gets availability fields only (status,
 // unavailable_reason, expected_return_date, player_daily_decisions
 // restrictions) plus a boolean saying notes exist. Enforced server-side:
