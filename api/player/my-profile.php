@@ -76,7 +76,7 @@ $hooper = $hooperStmt->fetch() ?: null;
 
 // Fetch latest assessment score
 $assStmt = $pdo->prepare(
-    'SELECT overall_score, type, created_at FROM assessments WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+    'SELECT overall_score, type, created_at FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) ORDER BY created_at DESC LIMIT 1'
 );
 $assStmt->execute([$user['id']]);
 $assessment = $assStmt->fetch() ?: null;

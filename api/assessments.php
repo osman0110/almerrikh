@@ -61,11 +61,22 @@ if ($method === 'GET') {
     // ── Attempt group: all captures of one test-taking session + best/average ──
     $attemptGroupId = trim($_GET['attempt_group_id'] ?? '');
     if ($attemptGroupId) {
-        $stmt = $pdo->prepare(
-            'SELECT * FROM assessments WHERE user_id = ? AND attempt_group_id = ?
-             ORDER BY attempt_number ASC'
-        );
-        $stmt->execute([$user['id'], $attemptGroupId]);
+        // Scoped to what the caller may see (the player's own rows, or the
+        // staff member's club) — never to whichever coach recorded them.
+        if ($isPlayer) {
+            $stmt = $pdo->prepare(
+                'SELECT * FROM assessments WHERE player_id = ? AND attempt_group_id = ?
+                 ORDER BY attempt_number ASC'
+            );
+            $stmt->execute([(string)($callerInfo['linked_player_id'] ?? ''), $attemptGroupId]);
+        } else {
+            $ctxGroup = requireClubPermission($pdo, $user, 'assessments.read');
+            $stmt = $pdo->prepare(
+                'SELECT * FROM assessments WHERE club_id = ? AND attempt_group_id = ?
+                 ORDER BY attempt_number ASC'
+            );
+            $stmt->execute([$ctxGroup['club_id'], $attemptGroupId]);
+        }
         $attempts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $validScores = [];
@@ -99,11 +110,14 @@ if ($method === 'GET') {
                 'assessments' => [],
             ], 404);
         }
+        // Keyed on the player only: assessments are recorded by the coach
+        // (user_id = coach), so filtering on the player's own user_id hid
+        // every coach-recorded result from "My Assessments".
         $stmt = $pdo->prepare(
-            'SELECT * FROM assessments WHERE user_id = ? AND player_id = ?
+            'SELECT * FROM assessments WHERE player_id = ?
              ORDER BY created_at DESC LIMIT ' . $limit
         );
-        $stmt->execute([$user['id'], $linkedPlayerId]);
+        $stmt->execute([$linkedPlayerId]);
     } else {
         // Club staff (coach/doctor/analyst/physio/...): scoped to the whole club,
         // not just the account that happens to be logged in.
@@ -184,6 +198,12 @@ if ($method === 'GET') {
         $existStmt->execute([$id, $ctxOverride['club_id']]);
         $existing = $existStmt->fetch(PDO::FETCH_ASSOC);
         if (!$existing) jsonOut(['error' => 'Assessment not found'], 404);
+        if (!canManageOwnedRecord($ctxOverride, $user, $existing)) {
+            jsonOut([
+                'error' => 'Forbidden — only the coach who recorded this assessment can change it',
+                'code'  => 'not_assessment_owner',
+            ], 403);
+        }
 
         if (!isset($body['override_score'])) jsonOut(['error' => 'override_score is required'], 400);
         $overrideScore = (int)$body['override_score'];
@@ -225,10 +245,16 @@ if ($method === 'GET') {
         }
 
         $ctxApprove = requireClubPermission($pdo, $user, 'assessments.write');
-        $existStmtA = $pdo->prepare('SELECT id, status FROM assessments WHERE id = ? AND club_id = ?');
+        $existStmtA = $pdo->prepare('SELECT id, status, user_id, club_id FROM assessments WHERE id = ? AND club_id = ?');
         $existStmtA->execute([$id, $ctxApprove['club_id']]);
         $existingA = $existStmtA->fetch(PDO::FETCH_ASSOC);
         if (!$existingA) jsonOut(['error' => 'Assessment not found'], 404);
+        if (!canManageOwnedRecord($ctxApprove, $user, $existingA)) {
+            jsonOut([
+                'error' => 'Forbidden — only the coach who recorded this assessment can approve it',
+                'code'  => 'not_assessment_owner',
+            ], 403);
+        }
 
         $updA = $pdo->prepare(
             "UPDATE assessments
@@ -278,10 +304,12 @@ if ($method === 'GET') {
     }
 
     // Coaches: verify player belongs to their club (players: player_id comes from DB in GET, skip check)
-    $callerInfo2 = $pdo->prepare('SELECT player_type FROM users WHERE id = ?');
+    $callerInfo2 = $pdo->prepare('SELECT player_type, linked_player_id FROM users WHERE id = ?');
     $callerInfo2->execute([$user['id']]);
-    $isPlayer2 = !empty($callerInfo2->fetch()['player_type']);
+    $callerRow2 = $callerInfo2->fetch() ?: [];
+    $isPlayer2 = !empty($callerRow2['player_type']);
     $playerClubId = null;
+    $ctxWrite = null;
     if (!$isPlayer2) {
         $ctxWrite = requireClubPermission($pdo, $user, 'assessments.write');
         $ownerCheck = $pdo->prepare('SELECT club_id FROM club_players WHERE id = ? AND club_id = ?');
@@ -291,10 +319,50 @@ if ($method === 'GET') {
             jsonOut(['error' => 'Forbidden — player not in your club'], 403);
         }
         $playerClubId = $ownerRow['club_id'];
+
+        // Recording into a session is a write on that session — only its
+        // owning coach (or owner/admin) may attach assessments to it.
+        if ($sessionId !== null) {
+            $sessStmt = $pdo->prepare('SELECT user_id, club_id FROM club_sessions WHERE id = ?');
+            $sessStmt->execute([$sessionId]);
+            $sessRow = $sessStmt->fetch(PDO::FETCH_ASSOC);
+            if ($sessRow && !canManageOwnedRecord($ctxWrite, $user, $sessRow)) {
+                jsonOut([
+                    'error' => 'Forbidden — only the coach who owns this session can record assessments in it',
+                    'code'  => 'not_session_owner',
+                ], 403);
+            }
+        }
     } else {
+        // A player may only ever record a (self-)assessment for their own
+        // linked profile — never for a player_id taken from the request.
+        if ($playerId !== (string)($callerRow2['linked_player_id'] ?? '')) {
+            jsonOut(['error' => 'Forbidden — players can only save their own assessments'], 403);
+        }
         $pcStmt = $pdo->prepare('SELECT club_id FROM club_players WHERE id = ?');
         $pcStmt->execute([$playerId]);
         $playerClubId = $pcStmt->fetchColumn() ?: null;
+    }
+
+    // Re-posting an existing id is an idempotent retry by the same author
+    // (network retry / double tap) — never a way to overwrite someone
+    // else's assessment or move it to another player.
+    $prevStmt = $pdo->prepare('SELECT user_id, club_id, player_id, overall_score FROM assessments WHERE id = ?');
+    $prevStmt->execute([$id]);
+    $previous = $prevStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    if ($previous) {
+        $sameAuthor = (int)$previous['user_id'] === (int)$user['id'];
+        $adminOverride = $ctxWrite !== null
+            && canManageOwnedRecord($ctxWrite, $user, $previous);
+        if (!$sameAuthor && !$adminOverride) {
+            jsonOut([
+                'error' => 'Forbidden — only the coach who recorded this assessment can change it',
+                'code'  => 'not_assessment_owner',
+            ], 403);
+        }
+        if ((string)$previous['player_id'] !== $playerId) {
+            jsonOut(['error' => 'Assessment id already belongs to another player'], 409);
+        }
     }
 
     $stmt = $pdo->prepare(
@@ -348,7 +416,17 @@ if ($method === 'GET') {
         $tsStmt->execute([$playerId, $playerClubId]);
     }
 
-    jsonOut(['success' => true, 'id' => $id]);
+    require_once 'includes/audit_log.php';
+    if ($previous) {
+        logAuditSafe(
+            $pdo, 'assessments', $id, 'overall_score',
+            (string)$previous['overall_score'], (string)$overall, (int)$user['id']
+        );
+    } else {
+        logAuditSafe($pdo, 'assessments', $id, 'created', null, $type . ':' . $overall, (int)$user['id']);
+    }
+
+    jsonOut(['success' => true, 'id' => $id, 'updated' => (bool)$previous]);
 
 } else {
     jsonOut(['error' => 'Method not allowed'], 405);

@@ -64,13 +64,15 @@ if (!$linkedPlayerId) {
 // ── Fetch assessments scoped to this player ONLY ─────────────────────────────
 $limit = min((int)($_GET['limit'] ?? 50), 200);
 
+// Keyed on the player's own profile only. Coach-recorded assessments carry
+// the coach's user_id, so the old `user_id = <player>` filter hid them all.
 $stmt = $pdo->prepare(
     'SELECT * FROM assessments
-     WHERE user_id = ? AND player_id = ?
+     WHERE player_id = ?
      ORDER BY created_at DESC
      LIMIT ' . $limit
 );
-$stmt->execute([$user['id'], $linkedPlayerId]);
+$stmt->execute([$linkedPlayerId]);
 $rows = $stmt->fetchAll();
 
 foreach ($rows as &$row) {

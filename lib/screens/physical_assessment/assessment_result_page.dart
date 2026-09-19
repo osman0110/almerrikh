@@ -638,6 +638,7 @@ class _AssessmentResultPageState extends State<AssessmentResultPage> {
   }
 
   Future<void> _approve() async {
+    if (_approving) return; // double-tap guard
     setState(() => _approving = true);
     final ok = await ClubService().approveAssessment(widget.result.id);
     if (!mounted) return;
@@ -1015,6 +1016,7 @@ class _AssessmentResultPageState extends State<AssessmentResultPage> {
   }
 
   Future<void> _saveAgain() async {
+    if (_saving) return; // double-tap guard (the id is stable, so a retry is an idempotent update)
     setState(() => _saving = true);
     await AssessmentStorageService.instance.saveAssessment(widget.result);
     setState(() { _saving = false; _saved = true; });

@@ -111,7 +111,7 @@ $rpe = $stmt->fetch() ?? [];
 
 // Fetch latest assessment score
 $stmt = $pdo->prepare(
-    'SELECT overall_score, type FROM assessments WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+    'SELECT overall_score, type FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) ORDER BY created_at DESC LIMIT 1'
 );
 $stmt->execute([$user['id']]);
 $assessment = $stmt->fetch() ?? [];

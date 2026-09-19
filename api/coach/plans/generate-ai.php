@@ -131,7 +131,7 @@ foreach ($playerIds as $pid) {
     }
     $assessScore = null;
     if ($lu) {
-        $s = $pdo->prepare('SELECT overall_score FROM assessments WHERE user_id=? ORDER BY created_at DESC LIMIT 1');
+        $s = $pdo->prepare('SELECT overall_score FROM assessments WHERE player_id = (SELECT linked_player_id FROM users WHERE id = ?) ORDER BY created_at DESC LIMIT 1');
         $s->execute([$lu]); $row = $s->fetch(); $assessScore = $row ? (int)$row['overall_score'] : null;
     }
     $completionRate = null;

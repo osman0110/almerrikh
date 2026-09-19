@@ -552,29 +552,6 @@ class ClubService {
     return false;
   }
 
-  Future<void> updatePlayerScores(String playerId, {
-    required double movement,
-    required double stability,
-    required double symmetry,
-    required double control,
-    required double overall,
-  }) async {
-    try {
-      await http.post(Uri.parse('$_base/players.php'),
-          headers: _h,
-          body: jsonEncode({
-            'id':             playerId,
-            'name':           '—', // required by API; won't overwrite if already set on UPDATE
-            'movement_score': movement,
-            'stability_score':stability,
-            'symmetry_score': symmetry,
-            'control_score':  control,
-            'latest_score':   overall,
-          })).timeout(const Duration(seconds: 8));
-    } catch (e) {
-      AppLogger.e('ClubService.updatePlayerScores', 'Request failed', e);
-    }
-  }
 
   // ── Sessions ───────────────────────────────────────────────────────────────
 
@@ -896,43 +873,6 @@ class ClubService {
     return [];
   }
 
-  Future<String?> addAssessment(PlayerAssessment assessment) async {
-    try {
-      final res = await http
-          .post(Uri.parse('$_base/assessments.php'),
-              headers: _h,
-              body: jsonEncode({
-                'id':                    assessment.id.isEmpty ? _uuid.v4() : assessment.id,
-                'player_id':             assessment.playerId,
-                'player_name':           assessment.playerName,
-                'type':                  assessment.type.name,
-                'overall_score':         assessment.overallScore.round(),
-                'movement_quality_score':assessment.movementQualityScore.round(),
-                'stability_score':       assessment.stabilityScore.round(),
-                'symmetry_score':        assessment.symmetryScore.round(),
-                'control_score':         assessment.controlScore.round(),
-                'quality_score':         assessment.assessmentQuality.round(),
-                'notes':                 assessment.coachNotes,
-              }))
-          .timeout(const Duration(seconds: 10));
-      final body = jsonDecode(res.body);
-      if (body is Map && body['success'] == true) {
-        await markPlayerAssessed(assessment.sessionId, assessment.playerId);
-        await updatePlayerScores(
-          assessment.playerId,
-          movement: assessment.movementQualityScore,
-          stability: assessment.stabilityScore,
-          symmetry: assessment.symmetryScore,
-          control: assessment.controlScore,
-          overall: assessment.overallScore,
-        );
-        return body['id']?.toString();
-      }
-    } catch (e) {
-      AppLogger.e('ClubService.addAssessment', 'Request failed', e);
-    }
-    return null;
-  }
 
   // ── Coach Notes ────────────────────────────────────────────────────────────
 
