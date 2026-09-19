@@ -799,3 +799,213 @@ APP_ENV=test TEST_DB_NAME=smart_sport_p1_test_20260919 php api/tests/p1_readines
 ## Final Recommendation
 
 **`READY FOR STAGING UAT`**. الخطوة التالية تنفيذ خطة الـ Staging أعلاه على السيرفر، ثم UAT، ثم Production Deployment Review.
+
+---
+
+# Staging & Server Verification — Phase 3 (2026-09-19)
+
+## حدود هذه المرحلة (بصراحة)
+
+من هذه البيئة **لا يوجد وصول للسيرفر**: لا SSH ولا cPanel ولا FTP لـ nextkick.me (مفاتيح SSH الموجودة تخص مشاريع أخرى، والنشر يتم برفع الملفات يدوياً عبر cPanel). ولا توجد بيئة Staging، ولا جهاز حقيقي متصل.
+
+لذلك:
+- **لم يُنفَّذ** `SELECT VERSION()` ولا `migrations.php status` على السيرفر.
+- **لم يُنشر** شيء على Staging، و**لم يُنفَّذ** UAT متعدد المستخدمين، و**لم يُنفَّذ** اختبار الجهاز.
+- ما نُفّذ فعلياً: فحص قراءة فقط لـ Endpoints عامة على الإنتاج (طلبات GET بدون توكن، بدون أي كتابة)، وتحقق من الـ Migrations على قواعد اختبار محلية مؤقتة، وتجهيز حزمة النشر كاملة.
+
+## Environment
+
+| البند | القيمة | المصدر |
+|---|---|---|
+| Production URL | `https://nextkick.me/api` | ثابت في `app_config.dart` |
+| Web server | LiteSpeed خلف Cloudflare | Headers لطلب `health.php` |
+| `health.php` | `{"status":"ok","checks":{"php":"ok","database":"ok"}}` | GET فعلي (قراءة فقط) |
+| PHP version (prod) | **غير معروف**: لا يظهر في الـ Headers | SERVER VERIFICATION REQUIRED |
+| DB engine/version (prod) | **غير معروف**. مؤشر قوي على **MariaDB**: الملف `migrations/live_v1.sql` مكتوب «Run once on nextkick.me» ويستخدم `ADD COLUMN IF NOT EXISTS` (صيغة MariaDB)، ومع ذلك طُبّق على الإنتاج | SERVER VERIFICATION REQUIRED: `SELECT VERSION();` |
+| Staging URL | لا يوجد | BLOCKED |
+| بيئة التحقق المحلية | PHP 8.3.14، MySQL 9.1.0، Flutter 3.32.8 | فعلي |
+| Release commit (backend + app) | انظر «Exact Release Commit» أدناه | git |
+
+## اكتشافات فحص الإنتاج (قراءة فقط)
+
+| # | الاكتشاف | الدليل | الإجراء |
+|---|---|---|---|
+| S1 | **`auth.php` على الإنتاج يحتوي `delete_account` فعلاً.** «Unknown action» لأكشن وهمي، و«Method not allowed» لـ `delete_account` بـ GET. هذا يصحّح افتراض التقرير السابق المبني على النسخة المحلية المنسوخة | curl فعلي | Report finding corrected after code verification |
+| S2 | **خطأ إنتاج: `players.php` يُرجع HTTP 200 بدل 401/403/404.** الملف يبدأ بـ 4 مسافات قبل `<?php`. LiteSpeed بلا output buffering يرسلها قبل الـ Headers فيضيع الـ status code. أثره: معالج 401 العام في التطبيق (تسجيل الخروج عند انتهاء الجلسة) لا يعمل لهذا الـ Endpoint | الإنتاج: `players.php → HTTP 200 "    {\"error\":\"Unauthorized\"}"`. محلياً بـ `output_buffering=0`: القديم 200 والمُصلح 401 | **أُصلح** (commit `17b3bd9`) مع اختبار CI يمنع تكراره في أي ملف |
+| S3 | **`auth.php` على الإنتاج يُرجع HTTP 200 لأخطائه** (`action=me` بدون توكن → 200، مع مسافة قبل JSON). نسخ `auth.php` المحلية نظيفة، فالنسخة المرفوعة يدوياً على السيرفر مختلفة | curl فعلي | رفع `auth.php` من الريبو ضمن الـ Manifest، ثم التحقق بـ `curl -i` |
+| S4 | `sessions.php` و `assessments.php` و `club/staff.php` تُرجع 401 صحيحاً | curl فعلي | — |
+
+## Migration Status
+
+| Migration | الحالة المحلية (قاعدة اختبار مُرقّاة) | الإنتاج | القرار |
+|---|---|---|---|
+| 0001–0004, 0007, 0010–0020 | APPLIED بنجاح عبر `migrations.php up` (MySQL 9.1) | **غير معروف** | تُطبّق على Staging أولاً بعد `status` |
+| **0005** (أرشفة RPE المكررة + Unique keys) | PENDING. يتخطاها الـ runner تلقائياً (`SKIPPED_MANUAL`) | غير معروف | **Manual Approval** حسب التصميم: تعدّل البيانات (`is_active_record=0` للمكرر، **بدون حذف**، مع Audit)، وتضيف `UNIQUE (logical_key)` و `(club_id, idempotency_key)`. تتطلب تشغيل `preflight_data_audit.sql` واعتماد قائمة الأرشفة. **غير مطلوبة لهذا الإصدار**: لا يعتمد عليها أي كود في الفرع. للتشغيل الرسمي: `php api/cli/migrations.php up 0005_archive_rpe_duplicates_and_add_unique_key.sql` بعد الموافقة |
+| **0006** (تصحيح `club_id` في تكوين الجسم) | PENDING (`SKIPPED_MANUAL`) | غير معروف | Manual Approval: تصحيح بيانات مع سجل (Ledger) وقابل للعكس. **غير مطلوبة لهذا الإصدار** |
+| **0008 / 0009** | على MySQL تفشل بصيغتها (`ADD COLUMN IF NOT EXISTS`). طُبّقت بصيغة MySQL في بيئة الاختبار فقط، و**لم يُعدَّل الملفان** | غير معروف (مؤشر MariaDB) | إن أثبت `SELECT VERSION()` أنها MariaDB تُترك كما هي. إن كانت MySQL: تُطبّق يدوياً بـ `ADD COLUMN` عادي، ثم تُسجَّل في `p0_schema_migrations` بنفس الـ checksum، **بدون تعديل الملف**، حتى لا ينكسر السجل في أي بيئة طُبّقت عليها |
+| **0021** (جديد: `assessments.status/approved_*`) | APPLIED. وتحقق منفصل: تضيف الأعمدة على جدول يفتقدها، وتشغيل ثانٍ لا يغيّر شيئاً (Idempotent)، والصفوف الموجودة تبقى (`pending_review`) | غير معروف | **مطلوبة لهذا الإصدار** لقاعدة «اللاعب يرى المعتمد فقط». آمنة على MySQL و MariaDB. وحتى لو لم تُطبَّق، لا يحدث 500 (راجع Fallback أدناه) |
+
+**اكتشاف إضافي:** «Fresh installation» من الصفر **غير ممكن بالأدوات الحالية**. لا يوجد ملف schema أساسي، و `ensureSchema()` يعدّل جدول `assessments` (`db.php:122`) قبل إنشائه (`db.php:187`). لذلك **Staging يجب أن يُبنى من نسخة من قاعدة الإنتاج** (مسار الترقية)، ولا يُبنى من الصفر.
+
+**Fallback:** عمود `assessments.status` كان يُنشأ فقط عبر الـ bootstrap المعطّل افتراضياً. أُضيف `playerAssessmentVisibilitySql()`: إذا غاب العمود فلا يوجد مسار اعتماد أصلاً، فيُعتبر الحفظ نهائياً (كما نص البند 6 من طلب المرحلة الثانية)، ولا يظهر 500 للاعب.
+
+## Automated Tests (فعلية، محلياً)
+
+| الاختبار | النتيجة |
+|---|---|
+| `p1_readiness_http_test` (HTTP حقيقي، **`output_buffering=0` مثل الإنتاج**) | **84/84** |
+| PHP pure: training load 36/36، body composition 23/23، acwr، rpe_identity، rbac_matrix، sessions_write، bc_completeness، training_load_quality، notification_isolation، **no_stray_output (جديد)**، **assessment_visibility (جديد)** | كلها OK |
+| DB tests: `p0_attendance_scope_test`، `p0_scope_integration_test` | OK |
+| `php -l` لكل ملفات `api/` | لا أخطاء |
+| `flutter test` | **32 passed، 0 failed، 1 skipped** |
+| `flutter analyze` | تحذير واحد قديم (`_latestHooper`)، **0 جديد** |
+| **على Staging** | **BLOCKED**: لا توجد بيئة Staging |
+
+## UAT Results
+
+| السيناريو | الحالة |
+|---|---|
+| 30 — إنشاء الأدوار (Owner/Admin/منع التصعيد) | **BLOCKED** على Staging. مُغطّى آلياً محلياً (D1–D6g) |
+| 31 — Reset Password | **BLOCKED** على Staging. محلياً PASS (D7–D15) |
+| 32 — ملكية الجلسات | **BLOCKED** على Staging. محلياً PASS (B1–B29) |
+| 33 — ظهور التقييمات (معتمد فقط + استثناء التسجيل الذاتي) | **BLOCKED** على Staging. محلياً PASS (A1b–A4) |
+| 34 — البيانات الطبية (Raw JSON) | **BLOCKED** على Staging. محلياً PASS (C1–C13) |
+| 35 — AI مخفي | **DEVICE VERIFICATION REQUIRED**. آلياً PASS (Flutter tests 3) |
+| 36 — الإشعارات | **BLOCKED / DEVICE VERIFICATION REQUIRED** |
+| 37 — الحماية من التكرار | **BLOCKED** على Staging. محلياً PASS (A8, B2, B27) |
+| 38 — حذف الحساب | **BLOCKED** على Staging. الإنتاج يحتوي الأكشن (S1). محلياً PASS (E1–E4) |
+| 39 — الجهاز الحقيقي (كل البنود) | **DEVICE VERIFICATION REQUIRED** |
+| 43 — مراجعة الـ Logs | **BLOCKED** |
+
+## AI Tests
+
+AI-based tests remain intentionally disabled through the centralized feature flag. Their source code, APIs, models, routes, historical data, and automated tests remain intact.
+
+**`INTENTIONALLY DISABLED — NOT A PRODUCTION BLOCKER`**
+
+## Security Verification
+
+| المجال | محلياً (HTTP حقيقي) | Staging |
+|---|---|---|
+| Session coach ownership | PASS | BLOCKED |
+| Admin escalation | PASS | BLOCKED |
+| Assessment isolation | PASS | BLOCKED |
+| Medical data exposure (Raw JSON) | PASS | BLOCKED |
+| Club isolation | PASS | BLOCKED |
+
+## FCM
+
+| البند | الحالة |
+|---|---|
+| وجود الـ Credentials خارج Git | SERVER VERIFICATION REQUIRED (مستثناة من Git عمداً، وهذا صحيح) |
+| جدول `device_tokens` | SERVER VERIFICATION REQUIRED |
+| تسجيل التوكن | DEVICE VERIFICATION REQUIRED |
+| وصول Push فعلي | DEVICE VERIFICATION REQUIRED |
+| عدم حذف التوكن عند فشل مؤقت | PASS آلياً (9 حالات تصنيف)، وعلى السيرفر لم يُتحقق |
+
+## Temporary file (البند 24)
+
+`lib/screens/physical_assessment/assessment_result_page.dart.tmp.8856.8cfbb5a3aea1` كان نسخة احتياطية من المحرر (1123 سطراً، لا يستورده أي ملف، وامتداده ليس `.dart`). **حُذف في المرحلة الأولى** ضمن commit `f47047b` بدل commit مستقل. لا يمكن فصله الآن بدون إعادة كتابة التاريخ، ولم أفعل ذلك. الملف غير موجود في الشجرة الحالية.
+
+## Remaining Production Blockers
+
+1. **Staging لم يُنشأ، ولم يُنفَّذ عليه نشر ولا UAT** (لا وصول من هذه البيئة).
+2. **نوع وإصدار قاعدة الإنتاج وحالة الـ Migrations غير مُتحقق منها** (`SELECT VERSION()`، `migrations.php status`).
+3. **خطأ الـ status codes على الإنتاج** (S2 أُصلح في الكود ولم يُنشر، و S3 يحتاج رفع `auth.php`).
+4. **FCM والإشعارات وحذف الحساب لم تُجرَّب على السيرفر ولا على جهاز.**
+
+AI Tests المخفية **ليست** Blocker.
+
+## Production Readiness Score: **85/100** (بدون تغيير)
+
+لم يُرفع الرقم: كل التحقق الإضافي كان محلياً، وكشف فحص الإنتاج خطأً حقيقياً (S2/S3) لم يُنشر إصلاحه بعد. الكود جاهز، والتحقق على السيرفر هو الناقص.
+
+---
+
+## Production Deployment Review Package (للمراجعة فقط — لا يُنفَّذ الآن)
+
+### Exact Release Commit
+
+الـ SHA النهائي هو آخر commit على الفرع بعد commit هذا التقرير. الأمر `git log -1 --format=%H fix/production-readiness-closure` يطبعه. آخر commit كود قبل التقرير: `ec11250cb536b5e811195cdbfc9824b421b86c02`.
+
+### Deployment Manifest — Backend (`merr/api` → `nextkickwebsite/api`، ملفاً ملفاً)
+
+| path | الغرض | commits | Staging؟ | نوع | Migration؟ |
+|---|---|---|---|---|---|
+| `auth.php` | استبدال النسخة اليدوية على الإنتاج (status codes، S3). يحتوي `delete_account` | main | نعم | backend | لا |
+| `players.php` | إزالة المخرجات قبل `<?php` (S2) + حجب الطبي + حفظ الملاحظات | `17b3bd9` `0f36d86` | نعم | backend | لا |
+| `assessments.php` | ظهور اللاعب (معتمد فقط)، الملكية، Idempotency | `ec11250` `9eb4c65` `e42a9f6` | نعم | backend | **0021** |
+| `player/assessments.php`، `player/my-profile.php`، `player/reports/my-progress.php`، `player/ai-plan/generate.php`، `ai/generate-plan.php` | ظهور اللاعب (معتمد فقط) | `ec11250` `9eb4c65` `e42a9f6` | نعم | backend | **0021** |
+| `includes/assessment_visibility.php` | **جديد**: Fallback ظهور التقييمات | `ec11250` | نعم | backend | لا |
+| `coach/plans/generate-ai.php`، `club/session_assessments.php` | استعلامات بـ `player_id`/النادي | `e42a9f6` | نعم | backend | لا |
+| `sessions.php`، `sessions/exercises.php` | ملكية المدرب للجلسة، `sessions.write`، العزل، `can_manage` | `ad0d48b` | نعم | backend | لا |
+| `includes/club_auth.php` | الملكية، الطبي على مستويين، `EXPLICIT_ONLY_ACTIONS` | `f47047b` `8a08553` | نعم | backend | لا |
+| `includes/audit_log.php` | `logAuditSafe` | `f47047b` | نعم | backend | لا |
+| `club/staff.php` | إنشاء حساب، Reset، Owner-only admin، إلغاء الجلسات | `1be264f` `44b16af` | نعم | backend | لا |
+| `club/player.php`، `coach/players.php`، `alerts/coach.php`، `club/physical-coach-dashboard.php` | حجب النص الطبي | `0f36d86` | نعم | backend | لا |
+| `includes/notifications.php`، `includes/push.php`، `alerts/send.php` | عزل فشل الإشعار، عدم حذف التوكن | `983de23` | نعم | backend (FCM) | لا (يستخدم `device_tokens` من 0012) |
+| `cli/test_push.php` | أداة فحص Push | `983de23` | نعم | tooling | لا |
+| `club/injuries.php`، `club/physio_sessions.php`، `club/rehab_phases.php`، `club/tasks.php`، `matches.php`، `player/session/post-feedback.php` | إصلاحات 23 أغسطس غير المنشورة (الإشعار بعد الحفظ) | main | نعم | backend | لا |
+| `migrations/p0/0021_assessment_review_status.sql` (+ `.down.sql`) | **جديد** | `ec11250` | نعم | migration | — |
+
+**لا يُرفع:** `api/tests/*` (أدوات اختبار فقط)، و `api/mobile/` (غير مستخدم)، و `db_credentials.php` و `config/fcm-service-account.json` (أسرار موجودة على السيرفر، لا تُستبدل).
+
+### Frontend (App)
+
+كل تغييرات `lib/` (المراحل 1–2) تتطلب Build جديداً للتطبيق. القيم: `AI_TESTS_ENABLED` غير معرّف (القيمة الافتراضية false)، وبدون أسرار في الكود (Sentry عبر `--dart-define`).
+- **Staging build:** `flutter build apk --release --dart-define=API_BASE_URL=https://<staging-host>/api` (لم يُنفَّذ: لا يوجد Staging host).
+- **Production build:** بدون `API_BASE_URL` (الافتراضي `https://nextkick.me/api`).
+
+### Database Plan (بالترتيب)
+
+1. Backup كامل (dump) لقاعدة الإنتاج قبل أي شيء.
+2. `SELECT VERSION();` ثم `php api/cli/migrations.php status` (قراءة فقط) وحفظ الناتج.
+3. إن ظهر 0008/0009 PENDING: MariaDB → تُطبّق بالـ runner. MySQL → تُطبّق يدوياً بصيغة `ADD COLUMN` وتُسجّل بالـ checksum نفسه.
+4. تطبيق الـ PENDING المطلوبة فقط، **واحدة واحدة**: `php api/cli/migrations.php up <file>`، وأولها المطلوب لهذا الإصدار **0021**. أي pending آخر (مثل 0012 `device_tokens`) يُراجع قبل تطبيقه.
+5. **لا** 0005 ولا 0006 في هذا الإصدار (غير مطلوبتين، وتحتاجان موافقة بيانات).
+6. `migrations.php status` مرة أخرى.
+
+### Pre-Deploy Checklist
+
+- [ ] Staging UAT مكتمل بنجاح (غير منفّذ حتى الآن)
+- [ ] DB backup + backup لمجلد `api/` الحالي على السيرفر
+- [ ] `SELECT VERSION()` و `migrations.php status` محفوظان
+- [ ] وجود `config/fcm-service-account.json` (أو `FCM_SERVICE_ACCOUNT_PATH`) و `db_credentials.php`
+- [ ] الـ Manifest مطابق لـ `git diff main..<release-sha> -- api`
+
+### Deployment Commands (للتنفيذ لاحقاً على السيرفر)
+
+```bash
+# قراءة فقط أولاً
+mysql -e "SELECT VERSION();"
+php api/cli/migrations.php status
+# بعد رفع ملفات الـ Manifest
+find api -name '*.php' -newer <backup-marker> -exec php -l {} \;
+php api/cli/migrations.php up 0021_assessment_review_status.sql
+php api/cli/migrations.php status
+```
+
+### Post-Deploy Verification
+
+```bash
+curl -i https://nextkick.me/api/health.php            # 200 + database ok
+curl -i https://nextkick.me/api/players.php           # يجب 401 (كان 200)
+curl -i "https://nextkick.me/api/auth.php?action=me"  # يجب 401 (كان 200)
+php api/cli/test_push.php <test-account-email>        # Outcome: sent
+```
+
+ثم بحسابات اختبار: Login، وإنشاء جلسة وتعديلها ورفض المدرب B، وتقييم يدوي/FMS مع اعتماده ثم ظهوره للاعب، وقيد طبي يظهر للمدرب بدون النص، وحذف حساب اختبار.
+
+### Rollback Plan
+
+- **التطبيق (API):** إعادة رفع نسخة `api/` المحفوظة قبل النشر. كل التغييرات ملفات PHP مستقلة، ولا تغيّر شكل البيانات.
+- **قاعدة البيانات:** 0021 **إضافية فقط** (أعمدة جديدة إن غابت). الـ down مقصود أن يكون no-op لحماية سجل الاعتمادات. الكود القديم يعمل مع الأعمدة الموجودة. **لا توجد Migration غير قابلة للعكس في هذا الإصدار**، و 0005/0006 مستبعدتان.
+- **Build التطبيق:** إعادة نشر الـ Build السابق من المتجر/Codemagic.
+
+---
+
+## الحالة النهائية
+
+**`NOT READY FOR PRODUCTION — BLOCKERS REMAIN`**
+
+المتبقي: إنشاء Staging والنشر عليه، وتنفيذ UAT، والتحقق من DB/Migrations/FCM على السيرفر، واختبار الجهاز. كل ذلك يحتاج وصولاً للسيرفر وأجهزة غير متاحة في هذه البيئة. الكود وحزمة النشر جاهزان للمراجعة.
