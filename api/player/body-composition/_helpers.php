@@ -108,14 +108,18 @@ function resolvePlayerScope(
     $player = null;
     if ($linkedPlayerId) {
         $pStmt = $pdo->prepare(
-            'SELECT id, name, position, team_name, date_of_birth, height_cm FROM club_players WHERE id = ? LIMIT 1'
+            'SELECT id, name, position, team_name, date_of_birth, height_cm, club_id FROM club_players WHERE id = ? LIMIT 1'
         );
         $pStmt->execute([$linkedPlayerId]);
         $player = $pStmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
+    // club_user_id is the OWNER's user id, not a club id: a self-recorded
+    // assessment stored with it disappears from club-scoped reports. Prefer
+    // the roster row's real club, keeping the legacy value as a fallback.
+    $clubId = $player['club_id'] ?? ($user['club_user_id'] ?? null);
     return [
         'isCoach' => false, 'recordedBy' => 'self',
-        'linkedPlayerId' => $linkedPlayerId, 'clubId' => $user['club_user_id'] ?? null,
+        'linkedPlayerId' => $linkedPlayerId, 'clubId' => $clubId,
         'teamId' => null, 'staffRole' => null,
         'player' => $player,
     ];

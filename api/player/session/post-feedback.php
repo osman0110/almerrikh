@@ -109,7 +109,17 @@ $effectiveDuration = (!$completedFullSession && $actualDuration !== null) ? $act
 
 // Scoping from token — never trust client-supplied IDs
 $linkedPlayerId = $user['linked_player_id'] ?? null;
+// club_user_id is the OWNER's user id, not a club id. Storing it in club_id
+// broke club-scoped report filters, and looking staff up by it meant the
+// "player reported pain / high RPE" alert reached nobody (same bug fixed in
+// hooper/save.php and rpe/save.php).
 $clubId         = $user['club_user_id']     ?? null;
+if ($linkedPlayerId) {
+    $clubLookup = $pdo->prepare('SELECT club_id FROM club_players WHERE id = ?');
+    $clubLookup->execute([$linkedPlayerId]);
+    $resolvedClubId = $clubLookup->fetchColumn();
+    if ($resolvedClubId) $clubId = (int)$resolvedClubId;
+}
 
 // Validate session is assigned to this player
 if ($sessionId) {
