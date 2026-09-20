@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -40,8 +41,21 @@ class ApiService {
     Future.delayed(const Duration(seconds: 2), () => _handlingUnauthorized = false);
   }
 
+  /// Sign-in / sign-up calls: a 401 here means "wrong credentials", not
+  /// "your session expired" — mistyping a password must never clear the
+  /// session and bounce the user back to onboarding.
+  @visibleForTesting
+  static bool isAuthEntryPoint(Uri? url) {
+    if (url == null) return false;
+    if (!url.path.endsWith('/auth.php') && !url.path.endsWith('auth.php')) return false;
+    final action = url.queryParameters['action'];
+    return action == 'login' || action == 'register';
+  }
+
   static Map<String, dynamic> _decodeResponse(http.Response res) {
-    if (res.statusCode == 401) _handleUnauthorized();
+    if (res.statusCode == 401 && !isAuthEntryPoint(res.request?.url)) {
+      _handleUnauthorized();
+    }
     try {
       final decoded = jsonDecode(res.body);
       if (decoded is Map<String, dynamic>) return decoded;
