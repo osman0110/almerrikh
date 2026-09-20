@@ -114,7 +114,9 @@ class _TrainingLoadSectionState extends State<TrainingLoadSection>
             18,
             MediaQuery.of(context).viewInsets.bottom + 18,
           ),
-          child: Column(
+          // Same fix as the competition sheets: scrollable so the keyboard
+          // cannot push the confirm button out of reach.
+          child: SingleChildScrollView(child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -239,7 +241,7 @@ class _TrainingLoadSectionState extends State<TrainingLoadSection>
               ],
             ),
         ),
-      ),
+      )),
     );
 
     durationController.dispose();

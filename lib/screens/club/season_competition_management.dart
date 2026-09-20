@@ -581,7 +581,10 @@ class _SeasonEditSheetState extends State<_SeasonEditSheet> {
         left: 20, right: 20, top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 20,
       ),
-      child: Column(
+      // Scrollable: the form is taller than a phone screen (and much taller
+      // with the keyboard open), so a plain Column left the lower fields —
+      // including the save button — unreachable.
+      child: SingleChildScrollView(child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -640,7 +643,7 @@ class _SeasonEditSheetState extends State<_SeasonEditSheet> {
             ),
           ),
         ],
-      ),
+      )),
     );
   }
 }
@@ -798,7 +801,10 @@ class _CompetitionEditSheetState extends State<_CompetitionEditSheet> {
         left: 20, right: 20, top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 20,
       ),
-      child: Column(
+      // Scrollable: the form is taller than a phone screen (and much taller
+      // with the keyboard open), so a plain Column left the lower fields —
+      // including the save button — unreachable.
+      child: SingleChildScrollView(child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -934,7 +940,7 @@ class _CompetitionEditSheetState extends State<_CompetitionEditSheet> {
             ),
           ),
         ],
-      ),
+      )),
     );
   }
 
