@@ -108,7 +108,13 @@ class _ClubStaffScreenState extends State<ClubStaffScreen>
     final codes = results[1] as List<Map<String, dynamic>>?;
     final teams = results[2] as List<ClubTeam>;
     setState(() {
-      if (staff != null) _staff = staff;
+      // A removed member is suspended server-side, not deleted (audit trail).
+      // Hiding them here is what makes "remove" actually look removed.
+      if (staff != null) {
+        _staff = staff
+            .where((m) => (m['status'] ?? 'active').toString() != 'suspended')
+            .toList();
+      }
       if (codes != null) _codes = codes;
       _teams = teams;
       _loadError = staff == null || codes == null;

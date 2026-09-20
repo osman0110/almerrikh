@@ -56,10 +56,15 @@ $method = $_SERVER['REQUEST_METHOD'];
 $ctx = requireClubPermission($pdo, $user, 'staff.manage');
 
 if ($method === 'GET' && !isset($_GET['codes'])) {
+    // team_id/team_name were never returned, so the app showed "no team" for
+    // every staff member even after an assignment.
+    $hasTeamScope = SchemaInspector::hasColumn($pdo, 'club_staff', 'team_id');
+    $teamSelect = $hasTeamScope ? ', s.team_id, t.name AS team_name' : '';
+    $teamJoin   = $hasTeamScope ? ' LEFT JOIN club_teams t ON t.id = s.team_id' : '';
     $stmt = $pdo->prepare(
-        'SELECT s.id, s.user_id, s.staff_role, s.status, s.created_at, u.name, u.email
+        'SELECT s.id, s.user_id, s.staff_role, s.status, s.created_at, u.name, u.email' . $teamSelect . '
          FROM club_staff s
-         JOIN users u ON u.id = s.user_id
+         JOIN users u ON u.id = s.user_id' . $teamJoin . '
          WHERE s.club_id = ?
          ORDER BY FIELD(s.staff_role, "owner", "admin", "performance_manager", "coach", "tactical_coach", "doctor", "physiotherapist", "massage_specialist", "nutritionist", "analyst"), u.name ASC'
     );
@@ -111,6 +116,40 @@ if ($method === 'POST') {
     }
 
     // ── Create a new access code ───────────────────────────────────────────
+    // ── Assign a staff member to a team ────────────────────────────────────
+    // The app has always sent this action, but the endpoint never handled it:
+    // the request fell through to the access-code branch, which answered with
+    // a new code and created a stray invite, so "assign team" never worked.
+    if (($body['action'] ?? '') === 'assign_team') {
+        if (!SchemaInspector::hasColumn($pdo, 'club_staff', 'team_id')) {
+            jsonOut(['error' => 'Team scoping is not available on this database'], 409);
+        }
+        $staffId = trim((string)($body['staff_id'] ?? ''));
+        $teamId  = trim((string)($body['team_id'] ?? ''));
+        if ($staffId === '') jsonOut(['error' => 'staff_id is required'], 400);
+
+        $staffRow = $pdo->prepare('SELECT id, user_id FROM club_staff WHERE id = ? AND club_id = ?');
+        $staffRow->execute([$staffId, $ctx['club_id']]);
+        $staffMember = $staffRow->fetch(PDO::FETCH_ASSOC);
+        if (!$staffMember) jsonOut(['error' => 'Staff member not found'], 404);
+
+        $teamName = null;
+        if ($teamId !== '') {
+            $teamRow = $pdo->prepare('SELECT id, name FROM club_teams WHERE id = ? AND club_id = ?');
+            $teamRow->execute([$teamId, $ctx['club_id']]);
+            $team = $teamRow->fetch(PDO::FETCH_ASSOC);
+            if (!$team) jsonOut(['error' => 'Team not found in your club'], 404);
+            $teamName = $team['name'];
+        }
+
+        $pdo->prepare('UPDATE club_staff SET team_id = ? WHERE id = ? AND club_id = ?')
+            ->execute([$teamId !== '' ? $teamId : null, $staffId, $ctx['club_id']]);
+        logAuditSafe($pdo, 'club_staff', (string)$staffId, 'team_id', null,
+            $teamId !== '' ? (string)$teamId : 'cleared', (int)$user['id']);
+
+        jsonOut(['success' => true, 'staff_id' => $staffId, 'team_id' => $teamId ?: null, 'team_name' => $teamName]);
+    }
+
     // ── Create a staff login directly (no invite code / self sign-up) ───────
     // In-app sign-up was removed for App Store review (commit 7d66633), so
     // the club administration provisions staff accounts here, the same way
