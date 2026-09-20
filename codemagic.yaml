@@ -24,7 +24,10 @@ workflows:
       app_store_connect: "App Manager"
 
     environment:
-      flutter: stable
+      # Pinned deliberately: an unpinned 'stable' changed how plugins are
+      # integrated (Swift Package Manager) and broke Build 18 — the Podfile
+      # fixes for ITMS-90683 were silently bypassed. Match the local SDK.
+      flutter: 3.32.8
       xcode: latest
       cocoapods: default
       groups:
@@ -69,7 +72,9 @@ workflows:
           # releases are immutable, so every run needs a fresh build number.
           # Never reuse a build number App Store Connect has already seen:
           # builds 16 and 17 were pushed to TestFlight, so 18 is the floor.
-          BUILD_NO=$(( PROJECT_BUILD_NUMBER > 18 ? PROJECT_BUILD_NUMBER : 18 ))
+          # Builds 16, 17 and 18 have all been seen by App Store Connect, so 19
+          # is the floor now — a reused build number is rejected on upload.
+          BUILD_NO=$(( PROJECT_BUILD_NUMBER > 19 ? PROJECT_BUILD_NUMBER : 19 ))
           echo "Using build number $BUILD_NO"
           shorebird release ios \
             --export-options-plist=$HOME/export_options.plist \
