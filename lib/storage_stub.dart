@@ -35,6 +35,16 @@ class OnboardingStore {
   }
 
   Future<bool> isSignedIn() async {
+    // The iOS Keychain survives uninstall, SharedPreferences does not: an
+    // install with no prefs at all is fresh, so a leftover token from a
+    // previous install must not sign the user straight back in.
+    final prefs0 = await SharedPreferences.getInstance();
+    if (prefs0.getKeys().isEmpty) {
+      await _secureStorage.delete(key: 'ssot.token');
+    }
+    if (!(prefs0.getBool('ssot.installed') ?? false)) {
+      await prefs0.setBool('ssot.installed', true);
+    }
     var token = await _secureStorage.read(key: 'ssot.token');
     if (token == null || token.isEmpty) {
       // One-time migration for installs that signed in before this app

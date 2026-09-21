@@ -10,7 +10,6 @@ import '../../app_colors.dart';
 import '../../app_constants.dart';
 import '../../app_localizations.dart';
 import '../../app_state.dart';
-import '../../utils/crash_reporter.dart';
 import '../../utils/metric_formatter.dart';
 import '../../models/assessment_result_model.dart';
 import '../../models/monitoring_models.dart';
@@ -23,6 +22,7 @@ import '../../services/player_monitoring_service.dart'
     show PlayerMonitoringService;
 import '../../services/survey_reminder_service.dart';
 import '../../storage.dart';
+import '../../services/sign_out.dart';
 import '../../shared/club_status_color.dart';
 import '../club/club_widgets.dart'
     show
@@ -248,8 +248,7 @@ class _PlayerSidebar extends StatelessWidget {
     if (confirmed != true) return;
     if (context.mounted) Navigator.of(context).pop();
 
-    await OnboardingStore().clearSignedIn();
-    CrashReporter.clearContext();
+    await signOutUser();
     currentUserNameArabic = '';
     currentUserNameEnglish = '';
 
@@ -2160,8 +2159,7 @@ class _PlayerProfileBodyState extends State<_PlayerProfileBody> {
                       label: AppLocalizations.get('logout_btn'),
                       color: Colors.red,
                       onTap: () async {
-                        await OnboardingStore().clearSignedIn();
-                        CrashReporter.clearContext();
+                        await signOutUser();
                         currentUserNameArabic = '';
                         currentUserNameEnglish = '';
                         if (!context.mounted) return;

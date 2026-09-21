@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import '../../utils/app_logger.dart';
 
 import '../../api_service.dart';
-import '../../services/notification_service.dart';
 import '../../app_colors.dart';
 import '../../app_localizations.dart';
 import '../../app_state.dart';
@@ -13,8 +12,8 @@ import '../../models/club_models.dart';
 import '../../models/coach_monitoring_models.dart';
 import '../../services/club_service.dart';
 import '../../services/coach_monitoring_service.dart';
-import '../../services/firebase_service.dart';
 import '../../storage.dart';
+import '../../services/sign_out.dart';
 import 'admin_dashboard_page.dart';
 import 'club_widgets.dart';
 import 'match_detail_page.dart';
@@ -64,11 +63,8 @@ Future<void> _confirmSidebarLogout(BuildContext context) async {
     Navigator.of(context).pop();
   }
 
-  unawaited(NotificationService.unregisterPush());
-  unawaited(ApiService.logout());
-  unawaited(FirebaseService().signOut());
   try {
-    await OnboardingStore().clearSignedIn();
+    await signOutUser();
   } catch (e) {
     AppLogger.w(
       'SidebarLogout',

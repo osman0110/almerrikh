@@ -9,11 +9,9 @@ import '../../api_service.dart';
 import '../../app_colors.dart';
 import '../../app_localizations.dart';
 import '../../app_state.dart';
-import '../../services/firebase_service.dart';
 import '../../services/club_service.dart';
-import '../../services/notification_service.dart';
 import '../../storage.dart';
-import '../../utils/crash_reporter.dart';
+import '../../services/sign_out.dart';
 import '../account_deletion.dart';
 import 'club_dashboard.dart';
 
@@ -143,11 +141,7 @@ class _ClubSettingsPageState extends State<ClubSettingsPage> {
         isDanger: true,
         onConfirm: () async {
           Navigator.pop(ctx);
-          await NotificationService.unregisterPush();
-          await ApiService.logout();
-          await FirebaseService().signOut();
-          await OnboardingStore().clearSignedIn();
-          CrashReporter.clearContext();
+          await signOutUser();
           currentUserName = 'Player';
           currentUserNameArabic = '';
           currentUserNameEnglish = '';

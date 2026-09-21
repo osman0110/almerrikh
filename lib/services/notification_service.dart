@@ -192,7 +192,8 @@ class NotificationService {
   static Future<void> unregisterPush() async {
     if (kIsWeb) return;
     try {
-      final token = await FirebaseMessaging.instance.getToken();
+      final token = await FirebaseMessaging.instance.getToken()
+          .timeout(const Duration(seconds: 4));
       if (token != null) await ApiService.unregisterDeviceToken(token);
     } catch (e) {
       AppLogger.e('NotificationService.unregisterPush', 'Failed to unregister push', e);
