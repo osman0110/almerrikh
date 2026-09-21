@@ -46,6 +46,14 @@ class NotificationService {
   );
 
   static bool _pushRegistered = false;
+  static bool _listenersAttached = false;
+
+  /// Set by main() when Firebase.initializeApp fails — shown on the
+  /// notification diagnostics screen.
+  static String? firebaseInitError;
+
+  /// Outcome of the last registerPush run (diagnostics screen).
+  static Map<String, dynamic> lastPushDiag = {};
 
   static Future<void> init() async {
     if (_isInitialized) return;
@@ -86,18 +94,23 @@ class NotificationService {
   }
 
   /// Requests notification permission, registers the FCM token with the
-  /// backend, and wires up foreground/tap handling. Call once a user is
-  /// signed in (see RootGate._loadState in main.dart); safe to call more
-  /// than once — only does work the first time per app run.
-  static Future<void> registerPush() async {
-    if (_pushRegistered || kIsWeb) return;
+  /// backend, and wires up foreground/tap handling. Call after every sign-in
+  /// (RootGate._loadState, auth_page) — the token is registered each time
+  /// (sign-out deletes it server-side); listeners are attached only once.
+  /// [force] re-runs it from the diagnostics screen.
+  static Future<void> registerPush({bool force = false}) async {
+    if (kIsWeb || (_pushRegistered && !force)) return;
     _pushRegistered = true;
-    // iOS only: reported to the server log (after every step, so a hang
-    // still leaves a trace of how far registration got).
-    final diag = <String, dynamic>{'step': 'start'};
+    // Kept for the diagnostics screen and reported to the server log after
+    // every step, so a hang still leaves a trace of how far it got.
+    final diag = <String, dynamic>{
+      'platform': Platform.isIOS ? 'ios' : 'android',
+      'firebase_init_error': firebaseInitError,
+    };
+    lastPushDiag = diag;
     void report(String step) {
       diag['step'] = step;
-      if (Platform.isIOS) unawaited(ApiService.reportPushDiag(Map.of(diag)));
+      unawaited(ApiService.reportPushDiag(Map.of(diag)));
     }
     report('start');
     await init();
@@ -131,6 +144,7 @@ class NotificationService {
         diag['get_token_error'] = e.toString();
       }
       diag['fcm'] = token != null;
+      if (token != null) diag['fcm_token_prefix'] = '${token.substring(0, 12)}…';
       report('token');
       if (token != null) {
         diag['register_status'] = await ApiService.registerDeviceToken(
@@ -139,6 +153,11 @@ class NotificationService {
         );
         report('registered');
       }
+      if (_listenersAttached) {
+        report('done');
+        return;
+      }
+      _listenersAttached = true;
       messaging.onTokenRefresh.listen((newToken) {
         ApiService.registerDeviceToken(
           token: newToken,
@@ -177,7 +196,8 @@ class NotificationService {
       });
 
       // App launched by tapping the push from a fully-terminated state.
-      final initialMessage = await messaging.getInitialMessage();
+      final initialMessage = await messaging.getInitialMessage()
+          .timeout(const Duration(seconds: 5), onTimeout: () => null);
       if (initialMessage != null) {
         openLinkedRoute(initialMessage.data['linked_route'] as String?);
       }
@@ -191,6 +211,8 @@ class NotificationService {
   /// Best-effort token cleanup on logout — never blocks sign-out on failure.
   static Future<void> unregisterPush() async {
     if (kIsWeb) return;
+    // The next sign-in (same app run) must register the token again.
+    _pushRegistered = false;
     try {
       final token = await FirebaseMessaging.instance.getToken()
           .timeout(const Duration(seconds: 4));

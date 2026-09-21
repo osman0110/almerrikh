@@ -103,6 +103,7 @@ Future<void> main() async {
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     } catch (e) {
       AppLogger.e('main', 'Firebase.initializeApp failed', e);
+      NotificationService.firebaseInitError = e.toString();
     }
   }
 
@@ -110,6 +111,7 @@ Future<void> main() async {
   // — clear the local session and drop back to login instead of leaving
   // every screen to fail (or silently swallow the error) independently.
   ApiService.onUnauthorized = () {
+    unawaited(NotificationService.unregisterPush());
     unawaited(OnboardingStore().clearSignedIn());
     navigatorKey.currentState
         ?.pushNamedAndRemoveUntil('/onboarding', (route) => false);

@@ -22,6 +22,7 @@ import '../../services/player_monitoring_service.dart'
     show PlayerMonitoringService;
 import '../../services/survey_reminder_service.dart';
 import '../../storage.dart';
+import '../push_diagnostics_page.dart';
 import '../../services/sign_out.dart';
 import '../../shared/club_status_color.dart';
 import '../club/club_widgets.dart'
@@ -2152,6 +2153,14 @@ class _PlayerProfileBodyState extends State<_PlayerProfileBody> {
                       icon: Icons.info_outline_rounded,
                       label: AppLocalizations.get('about_app'),
                       onTap: () => _showAboutDialog(context),
+                    ),
+                    const SizedBox(height: 10),
+                    _ProfileAction(
+                      icon: Icons.bug_report_rounded,
+                      label: 'تشخيص الحساب والإشعارات',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const PushDiagnosticsPage()),
+                      ),
                     ),
                     const SizedBox(height: 10),
                     _ProfileAction(

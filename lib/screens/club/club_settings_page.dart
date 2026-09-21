@@ -13,6 +13,7 @@ import '../../services/club_service.dart';
 import '../../storage.dart';
 import '../../services/sign_out.dart';
 import '../account_deletion.dart';
+import '../push_diagnostics_page.dart';
 import 'club_dashboard.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -366,6 +367,16 @@ class _ClubSettingsPageState extends State<ClubSettingsPage> {
               accent: AppColors.primary,
               trailing: const _Chip('v1.0.0'),
               onTap: _showAboutDialog,
+            ),
+            const _Sep(),
+            _Row(
+              icon: Icons.bug_report_rounded,
+              title: 'تشخيص الحساب والإشعارات',
+              subtitle: 'فحص الجلسة والإشعارات وإرسال إشعار تجريبي',
+              accent: AppColors.primary,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PushDiagnosticsPage()),
+              ),
             ),
           ]),
 

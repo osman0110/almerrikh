@@ -681,6 +681,22 @@ class ApiService {
     }
   }
 
+  /// Diagnostics screen: this user's registered devices on the server
+  /// (action=status) or a test push with FCM's raw answer (action=test).
+  static Future<Map<String, dynamic>> pushDiagnostics(String action) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/device-tokens.php'),
+        headers: _headers,
+        body: jsonEncode({'action': action}),
+      ).timeout(const Duration(seconds: 20));
+      final body = jsonDecode(res.body);
+      return {'http_status': res.statusCode, if (body is Map<String, dynamic>) ...body};
+    } catch (e) {
+      return {'error': e.toString()};
+    }
+  }
+
   /// Sends a push-registration report to the server log (iOS debugging).
   static Future<void> reportPushDiag(Map<String, dynamic> diag) async {
     try {

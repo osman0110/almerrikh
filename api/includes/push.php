@@ -126,6 +126,8 @@ function fcmSendToToken(string $accessToken, string $projectId, string $token, s
     $curlError = curl_error($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    // Raw answer kept for the diagnostics endpoint (device-tokens.php test).
+    $GLOBALS['fcm_last_response'] = $httpCode . ' ' . ($response === false ? $curlError : (string)$response);
 
     return fcmClassifyResponse((int)$httpCode, $response === false ? '' : (string)$response, $curlError);
 }

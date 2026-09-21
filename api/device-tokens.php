@@ -6,6 +6,10 @@
  *
  * POST action=register, token=X, platform=android|ios, club_id=Y (optional)
  * POST action=unregister, token=X
+ * POST action=status  — this user's registered devices (diagnostics screen)
+ * POST action=test    — send a test push to this user's devices and return
+ *                       FCM's raw answer per device (diagnostics screen)
+ * POST action=diag    — log a client-side registration report to error_log
  */
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
@@ -14,6 +18,7 @@ header('Access-Control-Allow-Methods: POST, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/includes/push.php';
 
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
@@ -59,6 +64,42 @@ $token  = trim($body['token'] ?? '');
 if ($action === 'diag') {
     error_log('[push-diag] user ' . $user['id'] . ': ' . substr(json_encode($body['diag'] ?? null, JSON_UNESCAPED_UNICODE), 0, 1000));
     jsonOut(['success' => true]);
+}
+
+// Diagnostics: only ever about the caller's own devices.
+if ($action === 'status') {
+    $stmt = $pdo->prepare(
+        'SELECT platform, CONCAT(LEFT(token, 12), "…") AS token_prefix, created_at, updated_at
+         FROM device_tokens WHERE user_id = ? ORDER BY updated_at DESC'
+    );
+    $stmt->execute([$user['id']]);
+    jsonOut([
+        'success'         => true,
+        'user_id'         => (int)$user['id'],
+        'fcm_credentials' => is_file(fcmServiceAccountPath()),
+        'devices'         => $stmt->fetchAll(PDO::FETCH_ASSOC),
+    ]);
+}
+
+if ($action === 'test') {
+    $auth = getFcmAccessToken();
+    if (!$auth) jsonOut(['success' => false, 'message' => 'FCM credentials missing on server'], 500);
+    $stmt = $pdo->prepare('SELECT platform, token FROM device_tokens WHERE user_id = ?');
+    $stmt->execute([$user['id']]);
+    $results = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $outcome = fcmSendToToken($auth['access_token'], $auth['project_id'], $row['token'],
+            'Test notification', 'If you see this, push works on this device.',
+            ['linked_route' => '']);
+        $results[] = [
+            'platform'     => $row['platform'],
+            'token_prefix' => substr($row['token'], 0, 12) . '…',
+            'outcome'      => $outcome,
+            'fcm_response' => substr((string)($GLOBALS['fcm_last_response'] ?? ''), 0, 600),
+        ];
+    }
+    error_log('[push-test] user ' . $user['id'] . ': ' . json_encode(array_column($results, 'outcome')));
+    jsonOut(['success' => true, 'project_id' => $auth['project_id'], 'results' => $results]);
 }
 
 if (!$token) jsonOut(['success' => false, 'message' => 'token is required'], 400);
