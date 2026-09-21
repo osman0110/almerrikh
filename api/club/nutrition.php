@@ -1,7 +1,7 @@
 <?php
 /**
  * Nutrition, Hydration & Supplements (roadmap item 5).
- * Gated behind nutrition.read/write (doctor, nutritionist). Body-composition
+ * Gated behind nutrition.read/write (doctor, nutritionist, physical coach). Body-composition
  * goals stay on the existing player_body_composition_goals table, untouched.
  *
  * GET  ?player_id=X&section=profile      — allergy/macro/fluid target profile
@@ -282,6 +282,10 @@ if ($method === 'POST') {
         if (in_array($role, ['owner', 'admin'], true)) {
             // Admin/owner can sign off on behalf of either role in a small-club MVP setup.
             $role = trim($body['as_role'] ?? '');
+        } elseif ($role === 'coach') {
+            // The physical coach runs the nutrition programme and signs in the
+            // nutritionist slot; the doctor's sign-off is still required.
+            $role = 'nutritionist';
         }
         if (!in_array($role, ['doctor', 'nutritionist'], true)) {
             jsonOut(['success' => false, 'message' => 'Only a doctor or nutritionist may sign off'], 403);

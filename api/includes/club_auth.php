@@ -78,9 +78,10 @@ function clubStaffCan(string $staffRole, string $action): bool {
         // Player is not a club_staff row; this entry documents the one
         // fitness capability enforced directly by self-service endpoints.
         'player'  => ['fitness.rpe.create_for_self'],
-        // Physical coach — focused on training load/RPE/Hooper/readiness.
-        // No injury-file edits, no team management, no player deletion
-        // (owner/admin/performance_manager keep those).
+        // Physical coach — focused on training load/RPE/Hooper/readiness,
+        // plus full nutrition/hydration/supplement plans (club decision
+        // 2026-09-22). No injury-file edits, no team management, no player
+        // deletion (owner/admin/performance_manager keep those).
         'coach'   => [
             'players.read', 'players.write',
             'sessions.read', 'sessions.write',
@@ -93,6 +94,7 @@ function clubStaffCan(string $staffRole, string $action): bool {
             'teams.read',
             'seasons.read', 'competitions.read',
             'physio_sessions.read',
+            'nutrition.read', 'nutrition.write',
             'daily_readiness.read', 'daily_readiness.write',
             'tasks.view', 'tasks.manage', 'tasks.assign_others',
             'fitness.body_composition.view',

@@ -197,13 +197,14 @@ bool get canViewPhysioSessions =>
     canManagePhysioSessions || currentOrgRole == OrgRole.coach;
 
 /// True when the org role may manage nutrition/hydration/supplement plans
-/// (doctor, nutritionist, performance manager). Matches 'nutrition.write' in
+/// (doctor, nutritionist, physical coach, performance manager). Matches 'nutrition.write' in
 /// api/includes/club_auth.php's clubStaffCan() — performance_manager has it
 /// there too. Deliberately excludes admin/owner under the read-only
 /// management policy.
 bool get canManageNutrition =>
     currentOrgRole == OrgRole.doctor ||
     currentOrgRole == OrgRole.nutritionist ||
+    currentOrgRole == OrgRole.coach ||
     currentOrgRole == OrgRole.performanceManager;
 
 /// True when the org role may view the unified daily readiness dashboard
