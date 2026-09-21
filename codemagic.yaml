@@ -74,7 +74,8 @@ workflows:
           # builds 16 and 17 were pushed to TestFlight, so 18 is the floor.
           # Builds 16, 17 and 18 have all been seen by App Store Connect, so 19
           # is the floor now — a reused build number is rejected on upload.
-          BUILD_NO=$(( PROJECT_BUILD_NUMBER > 19 ? PROJECT_BUILD_NUMBER : 19 ))
+          # Build 19 may already exist too (iOS push fix), so 20 is the floor.
+          BUILD_NO=$(( PROJECT_BUILD_NUMBER > 20 ? PROJECT_BUILD_NUMBER : 20 ))
           echo "Using build number $BUILD_NO"
           shorebird release ios \
             --export-options-plist=$HOME/export_options.plist \

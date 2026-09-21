@@ -96,7 +96,23 @@ class NotificationService {
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission();
 
-      final token = await messaging.getToken();
+      // iOS: getToken() throws 'apns-token-not-set' until APNs has handed
+      // the device token over — wait for it, otherwise the token is never
+      // registered and iOS devices receive no pushes.
+      if (Platform.isIOS) {
+        for (var i = 0; i < 10; i++) {
+          if (await messaging.getAPNSToken() != null) break;
+          await Future.delayed(const Duration(seconds: 1));
+        }
+      }
+
+      String? token;
+      try {
+        token = await messaging.getToken();
+      } catch (e) {
+        // Still wire up onTokenRefresh below — it fires once APNs is ready.
+        AppLogger.e('NotificationService.registerPush', 'getToken failed', e);
+      }
       if (token != null) {
         await ApiService.registerDeviceToken(
           token: token,
