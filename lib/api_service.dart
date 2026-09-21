@@ -1854,14 +1854,14 @@ class ApiService {
     }
   }
 
-  /// Save pre-training wellness check (hooper + pre_rpe) linked to a session.
+  /// Save pre-training wellness check (hooper; optional pre_rpe) linked to a session.
   static Future<Map<String, dynamic>> saveSessionPreCheck({
     required String sessionId,
     required int sleepQuality,
     required int fatigue,
     required int stress,
     required int muscleSoreness,
-    required int preRpe,
+    int? preRpe,
     required bool painToday,
     double? sleepHours,
     String? notes,
@@ -1877,7 +1877,7 @@ class ApiService {
               'fatigue':         fatigue,
               'stress':          stress,
               'muscle_soreness': muscleSoreness,
-              'pre_rpe':         preRpe,
+              if (preRpe != null) 'pre_rpe': preRpe,
               'pain_today':      painToday ? 1 : 0,
               if (sleepHours != null) 'sleep_hours': sleepHours,
               if (notes != null)      'notes':       notes,

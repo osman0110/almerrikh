@@ -21,7 +21,6 @@ class _PreTrainingWellnessScreenState
   int  _stress       = 0;
   int  _soreness     = 0;
   int  _sleepQuality = 0;
-  int  _preRpe       = 0;
   bool _painToday    = false;
   final _notesCtrl   = TextEditingController();
   bool _submitting   = false;
@@ -31,7 +30,7 @@ class _PreTrainingWellnessScreenState
 
   bool get _isValid =>
       _fatigue > 0 && _stress > 0 && _soreness > 0 &&
-      _sleepQuality > 0 && _preRpe > 0;
+      _sleepQuality > 0;
 
   @override
   void dispose() {
@@ -48,7 +47,6 @@ class _PreTrainingWellnessScreenState
       fatigue:        _fatigue,
       stress:         _stress,
       muscleSoreness: _soreness,
-      preRpe:         _preRpe,
       painToday:      _painToday,
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
     );
@@ -131,14 +129,6 @@ class _PreTrainingWellnessScreenState
                     count: 7,
                     color: const Color(0xff8B5CF6),
                     onChanged: (v) => setState(() => _sleepQuality = v),
-                  ),
-                  _buildField(
-                    label: AppLocalizations.get('wellness_expected_rpe'),
-                    hint: AppLocalizations.get('wellness_rpe_hint'),
-                    value: _preRpe,
-                    count: 10,
-                    color: AppColors.primary,
-                    onChanged: (v) => setState(() => _preRpe = v),
                   ),
                   const SizedBox(height: 20),
                   _label(AppLocalizations.get('pain_today_question')),

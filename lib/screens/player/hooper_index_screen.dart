@@ -162,7 +162,7 @@ class _HooperIndexScreenState extends State<HooperIndexScreen> {
                 value: sleep,
                 onChanged: (v) => setState(() => sleep = v),
                 labels: const [
-                  'ضعيف', '', '', '', 'طبيعي', '', 'ممتاز'
+                  'ممتاز', '', '', '', 'طبيعي', '', 'ضعيف'
                 ],
               ),
               const SizedBox(height: 18),
