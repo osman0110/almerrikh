@@ -4,6 +4,7 @@ import 'dart:async' show unawaited;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -54,6 +55,16 @@ class NotificationService {
 
   /// Outcome of the last registerPush run (diagnostics screen).
   static Map<String, dynamic> lastPushDiag = {};
+
+  // The token this device registered, so sign-out can delete it without
+  // calling getToken() — which can hang on iOS and leave the row behind.
+  static const _tokenKey = 'ssot.fcmToken';
+  static Future<void> _saveToken(String token) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_tokenKey, token);
+    } catch (_) {}
+  }
 
   static Future<void> init() async {
     if (_isInitialized) return;
@@ -151,6 +162,7 @@ class NotificationService {
           token: token,
           platform: Platform.isIOS ? 'ios' : 'android',
         );
+        await _saveToken(token);
         report('registered');
       }
       if (_listenersAttached) {
@@ -159,6 +171,7 @@ class NotificationService {
       }
       _listenersAttached = true;
       messaging.onTokenRefresh.listen((newToken) {
+        _saveToken(newToken);
         ApiService.registerDeviceToken(
           token: newToken,
           platform: Platform.isIOS ? 'ios' : 'android',
@@ -214,8 +227,11 @@ class NotificationService {
     // The next sign-in (same app run) must register the token again.
     _pushRegistered = false;
     try {
-      final token = await FirebaseMessaging.instance.getToken()
-          .timeout(const Duration(seconds: 4));
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString(_tokenKey) ??
+          await FirebaseMessaging.instance.getToken()
+              .timeout(const Duration(seconds: 4));
+      await prefs.remove(_tokenKey);
       if (token != null) await ApiService.unregisterDeviceToken(token);
     } catch (e) {
       AppLogger.e('NotificationService.unregisterPush', 'Failed to unregister push', e);
