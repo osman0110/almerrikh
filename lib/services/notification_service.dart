@@ -3,6 +3,7 @@ import 'dart:async' show unawaited;
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
@@ -55,6 +56,21 @@ class NotificationService {
 
   /// Outcome of the last registerPush run (diagnostics screen).
   static Map<String, dynamic> lastPushDiag = {};
+
+  /// iOS native APNs registration result (ios/Runner/AppDelegate.swift):
+  /// state pending/registered/failed + Apple's error, and the profile's
+  /// aps-environment.
+  static const _apnsChannel = MethodChannel('merr/apns');
+  static Future<Map<String, dynamic>> nativeApnsStatus() async {
+    if (kIsWeb || !Platform.isIOS) return {};
+    try {
+      final r = await _apnsChannel.invokeMethod<Map>('status')
+          .timeout(const Duration(seconds: 3));
+      return Map<String, dynamic>.from(r ?? {});
+    } catch (e) {
+      return {'channel_error': e.toString()};
+    }
+  }
 
   // The token this device registered, so sign-out can delete it without
   // calling getToken() — which can hang on iOS and leave the row behind.
@@ -136,6 +152,11 @@ class NotificationService {
       // the device token over — wait for it, otherwise the token is never
       // registered and iOS devices receive no pushes.
       if (Platform.isIOS) {
+        // Ask Apple again (harmless if already registered) so the native
+        // side reports a fresh token-or-error outcome.
+        try {
+          await _apnsChannel.invokeMethod('register');
+        } catch (_) {}
         for (var i = 0; i < 10; i++) {
           if (await messaging.getAPNSToken()
                   .timeout(const Duration(seconds: 3), onTimeout: () => null) != null) break;
@@ -143,6 +164,7 @@ class NotificationService {
         }
         diag['apns'] = await messaging.getAPNSToken()
             .timeout(const Duration(seconds: 3), onTimeout: () => null) != null;
+        diag['native_apns'] = await nativeApnsStatus();
         report('apns');
       }
 

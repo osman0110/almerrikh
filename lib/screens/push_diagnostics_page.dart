@@ -64,6 +64,7 @@ class _PushDiagnosticsPageState extends State<PushDiagnosticsPage> {
     final settings = await _safe(messaging.getNotificationSettings, 'permission');
     _report['permission'] = settings?.authorizationStatus.name;
     if (Platform.isIOS) {
+      _report['native_apns'] = await NotificationService.nativeApnsStatus();
       final apns = await _safe(messaging.getAPNSToken, 'apns');
       _report['apns_token'] = apns == null ? null : '${apns.substring(0, 12)}…';
     }
@@ -179,8 +180,16 @@ class _PushDiagnosticsPageState extends State<PushDiagnosticsPage> {
             _row('تهيئة Firebase', r['firebase_init_error'] ?? 'OK',
                 ok: r['firebase_init_error'] == null),
             _row('إذن الإشعارات', perm, ok: perm == 'authorized' || perm == 'provisional'),
-            if (Platform.isIOS)
+            if (Platform.isIOS) ...[
+              _row('تسجيل Apple (native)', (r['native_apns'] as Map?)?['state'],
+                  ok: (r['native_apns'] as Map?)?['state'] == 'registered'),
+              if ((r['native_apns'] as Map?)?['error'] != null)
+                _row('خطأ Apple', (r['native_apns'] as Map)['error'], ok: false),
+              _row('aps-environment في البروفايل',
+                  (r['native_apns'] as Map?)?['profile_aps_environment'],
+                  ok: (r['native_apns'] as Map?)?['profile_aps_environment'] == 'production'),
               _row('APNs token', r['apns_token'] ?? r['apns_error'], ok: r['apns_token'] != null),
+            ],
             _row('FCM token', r['fcm_token'] ?? r['fcm_error'], ok: r['fcm_token'] != null),
           ]),
           _card('السيرفر', [
