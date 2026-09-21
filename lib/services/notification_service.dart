@@ -92,39 +92,52 @@ class NotificationService {
   static Future<void> registerPush() async {
     if (_pushRegistered || kIsWeb) return;
     _pushRegistered = true;
+    // iOS only: reported to the server log (after every step, so a hang
+    // still leaves a trace of how far registration got).
+    final diag = <String, dynamic>{'step': 'start'};
+    void report(String step) {
+      diag['step'] = step;
+      if (Platform.isIOS) unawaited(ApiService.reportPushDiag(Map.of(diag)));
+    }
+    report('start');
     await init();
-    // iOS only: reported to the server log so a missing token can be traced.
-    final diag = <String, dynamic>{};
     try {
       final messaging = FirebaseMessaging.instance;
-      final settings = await messaging.requestPermission();
+      final settings = await messaging.requestPermission()
+          .timeout(const Duration(seconds: 30));
       diag['permission'] = settings.authorizationStatus.name;
+      report('permission');
 
       // iOS: getToken() throws 'apns-token-not-set' until APNs has handed
       // the device token over — wait for it, otherwise the token is never
       // registered and iOS devices receive no pushes.
       if (Platform.isIOS) {
         for (var i = 0; i < 10; i++) {
-          if (await messaging.getAPNSToken() != null) break;
+          if (await messaging.getAPNSToken()
+                  .timeout(const Duration(seconds: 3), onTimeout: () => null) != null) break;
           await Future.delayed(const Duration(seconds: 1));
         }
-        diag['apns'] = await messaging.getAPNSToken() != null;
+        diag['apns'] = await messaging.getAPNSToken()
+            .timeout(const Duration(seconds: 3), onTimeout: () => null) != null;
+        report('apns');
       }
 
       String? token;
       try {
-        token = await messaging.getToken();
+        token = await messaging.getToken().timeout(const Duration(seconds: 20));
       } catch (e) {
         // Still wire up onTokenRefresh below — it fires once APNs is ready.
         AppLogger.e('NotificationService.registerPush', 'getToken failed', e);
         diag['get_token_error'] = e.toString();
       }
       diag['fcm'] = token != null;
+      report('token');
       if (token != null) {
         diag['register_status'] = await ApiService.registerDeviceToken(
           token: token,
           platform: Platform.isIOS ? 'ios' : 'android',
         );
+        report('registered');
       }
       messaging.onTokenRefresh.listen((newToken) {
         ApiService.registerDeviceToken(
@@ -172,7 +185,7 @@ class NotificationService {
       AppLogger.e('NotificationService.registerPush', 'Failed to register push', e);
       diag['error'] = e.toString();
     }
-    if (Platform.isIOS) unawaited(ApiService.reportPushDiag(diag));
+    report('done');
   }
 
   /// Best-effort token cleanup on logout — never blocks sign-out on failure.
