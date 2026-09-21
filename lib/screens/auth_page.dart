@@ -363,9 +363,40 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
                                   ],
                                 ),
                               ),
-                              // Sign-up removed: accounts are created by the club admin only
-                              // (App Store 5.1.1(v) — no in-app account creation).
                               const SizedBox(height: 24),
+                              // ── Login / Register toggle ───────────────────
+                              _buildAnimatedSlideIn(
+                                index: 1,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.card,
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(
+                                      color: AppColors.border,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: _AuthModeButton(
+                                          text: AppLocalizations.get('auth_sign_in'),
+                                          active: !isSignUp,
+                                          onTap: () => setState(() => isSignUp = false),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: _AuthModeButton(
+                                          text: AppLocalizations.get('auth_sign_up'),
+                                          active: isSignUp,
+                                          onTap: () => setState(() => isSignUp = true),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 18),
 
                               // ── REGISTER-ONLY section ─────────────────────
                               if (isSignUp) ...[
@@ -515,6 +546,48 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
   }
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth Mode Toggle Button
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AuthModeButton extends StatelessWidget {
+  const _AuthModeButton({
+    required this.text,
+    required this.active,
+    required this.onTap,
+  });
+  final String text;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration:  const Duration(milliseconds: 180),
+        height:    42,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: active ? AppColors.maroon : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          border: active
+              ? Border.all(color: AppColors.primary.withOpacity(0.50), width: 1)
+              : null,
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            color:      active ? AppColors.primary : AppColors.muted,
+            fontSize:   14,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Text Field
