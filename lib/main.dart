@@ -83,6 +83,7 @@ import 'models/assessment_result_model.dart';
 import 'models/player_profile_model.dart';
 import 'services/sound_manager.dart';
 import 'services/club_service.dart';
+import 'firebase_options.dart';
 import 'services/notification_service.dart';
 import 'services/navigation_service.dart';
 import 'screens/onboarding_page.dart';
@@ -95,7 +96,10 @@ Future<void> main() async {
 
   if (!kIsWeb) {
     try {
-      await Firebase.initializeApp();
+      // Explicit options: ios/Runner/GoogleService-Info.plist is not in the
+      // Xcode project (and belongs to another Firebase project), so the
+      // no-arg call failed on iOS with [core/no-app] and killed all push.
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     } catch (e) {
       AppLogger.e('main', 'Firebase.initializeApp failed', e);
