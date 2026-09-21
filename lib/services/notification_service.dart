@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'dart:async' show unawaited;
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -92,9 +93,12 @@ class NotificationService {
     if (_pushRegistered || kIsWeb) return;
     _pushRegistered = true;
     await init();
+    // iOS only: reported to the server log so a missing token can be traced.
+    final diag = <String, dynamic>{};
     try {
       final messaging = FirebaseMessaging.instance;
-      await messaging.requestPermission();
+      final settings = await messaging.requestPermission();
+      diag['permission'] = settings.authorizationStatus.name;
 
       // iOS: getToken() throws 'apns-token-not-set' until APNs has handed
       // the device token over — wait for it, otherwise the token is never
@@ -104,6 +108,7 @@ class NotificationService {
           if (await messaging.getAPNSToken() != null) break;
           await Future.delayed(const Duration(seconds: 1));
         }
+        diag['apns'] = await messaging.getAPNSToken() != null;
       }
 
       String? token;
@@ -112,9 +117,11 @@ class NotificationService {
       } catch (e) {
         // Still wire up onTokenRefresh below — it fires once APNs is ready.
         AppLogger.e('NotificationService.registerPush', 'getToken failed', e);
+        diag['get_token_error'] = e.toString();
       }
+      diag['fcm'] = token != null;
       if (token != null) {
-        await ApiService.registerDeviceToken(
+        diag['register_status'] = await ApiService.registerDeviceToken(
           token: token,
           platform: Platform.isIOS ? 'ios' : 'android',
         );
@@ -163,7 +170,9 @@ class NotificationService {
       }
     } catch (e) {
       AppLogger.e('NotificationService.registerPush', 'Failed to register push', e);
+      diag['error'] = e.toString();
     }
+    if (Platform.isIOS) unawaited(ApiService.reportPushDiag(diag));
   }
 
   /// Best-effort token cleanup on logout — never blocks sign-out on failure.

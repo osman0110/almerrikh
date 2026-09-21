@@ -663,19 +663,33 @@ class ApiService {
     }
   }
 
-  static Future<void> registerDeviceToken({
+  /// Returns the HTTP status, or null if the request itself failed.
+  static Future<int?> registerDeviceToken({
     required String token,
     required String platform,
   }) async {
     try {
-      await http.post(
+      final res = await http.post(
         Uri.parse('$_baseUrl/device-tokens.php'),
         headers: _headers,
         body: jsonEncode({'action': 'register', 'token': token, 'platform': platform}),
       ).timeout(const Duration(seconds: 10));
+      return res.statusCode;
     } catch (e) {
       AppLogger.e('ApiService.registerDeviceToken', 'Request failed', e);
+      return null;
     }
+  }
+
+  /// Sends a push-registration report to the server log (iOS debugging).
+  static Future<void> reportPushDiag(Map<String, dynamic> diag) async {
+    try {
+      await http.post(
+        Uri.parse('$_baseUrl/device-tokens.php'),
+        headers: _headers,
+        body: jsonEncode({'action': 'diag', 'diag': diag}),
+      ).timeout(const Duration(seconds: 10));
+    } catch (_) {}
   }
 
   static Future<void> unregisterDeviceToken(String token) async {

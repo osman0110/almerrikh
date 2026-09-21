@@ -55,6 +55,12 @@ $body   = json_decode(file_get_contents('php://input'), true) ?? [];
 $action = trim($body['action'] ?? 'register');
 $token  = trim($body['token'] ?? '');
 
+// Client-side push registration report (iOS debugging) — log only, no token needed.
+if ($action === 'diag') {
+    error_log('[push-diag] user ' . $user['id'] . ': ' . substr(json_encode($body['diag'] ?? null, JSON_UNESCAPED_UNICODE), 0, 1000));
+    jsonOut(['success' => true]);
+}
+
 if (!$token) jsonOut(['success' => false, 'message' => 'token is required'], 400);
 
 if ($action === 'unregister') {
@@ -73,6 +79,7 @@ if ($action === 'register') {
          ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), club_id = VALUES(club_id),
              platform = VALUES(platform), updated_at = CURRENT_TIMESTAMP'
     )->execute([$user['id'], $clubId, $token, $platform]);
+    error_log('[push] registered ' . $platform . ' token for user ' . $user['id']);
 
     jsonOut(['success' => true]);
 }
